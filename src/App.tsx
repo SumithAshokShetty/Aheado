@@ -1,0 +1,2228 @@
+import React, { useState, useEffect, useRef } from "react";
+import { 
+  Zap, 
+  Sparkles, 
+  Clock, 
+  CreditCard, 
+  FileText, 
+  Calendar, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Terminal as TerminalIcon, 
+  ArrowRight, 
+  Plus, 
+  Trash2, 
+  Play, 
+  ArrowDown, 
+  RefreshCw, 
+  FileCode, 
+  User, 
+  Check, 
+  Lock, 
+  ShieldAlert,
+  Sliders,
+  ChevronRight,
+  Eye,
+  Copy,
+  Layers,
+  Activity
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { AgentExecutionModal } from "./components/AgentExecutionModal";
+import { GoogleWorkspaceConsole } from "./components/GoogleWorkspaceConsole";
+import { 
+  loadConnectionState, 
+  GoogleConnectionState, 
+  googleSignIn, 
+  googleSignOut,
+  fetchGoogleProfile,
+  applyManualDeveloperToken,
+  fetchCalendarEvents,
+  fetchLatestEmails,
+  SimpleCalendarEvent,
+  SimpleGmailMessage
+} from "./lib/googleApi";
+
+// Preset crisis scenarios for rapid testing
+const SCENARIOS = [
+  {
+    id: "student-crisis",
+    label: "Overwhelmed Student",
+    icon: User,
+    description: "Lab due in 3 hours, unstudied midterm tomorrow, and advisor overlap.",
+    text: "I have an organic chemistry lab due in 3 hours, a math midterm tomorrow morning that I haven't started studying for, and an advisor sync that overlaps with a mandatory group project presentation.",
+    tasks: [
+      { id: "task-1", title: "Organic Chemistry Lab Report", deadline: "In 3 hours", category: "assignment", urgency: "CRITICAL" },
+      { id: "task-2", title: "Math Midterm Exam Prep", deadline: "Tomorrow, 9:00 AM", category: "assignment", urgency: "HIGH" },
+      { id: "task-3", title: "Advisor Sync Meeting", deadline: "Tomorrow, 10:00 AM", category: "calendar", urgency: "HIGH" },
+      { id: "task-4", title: "Group Presentation Sync", deadline: "Tomorrow, 10:00 AM", category: "calendar", urgency: "CRITICAL" }
+    ]
+  },
+  {
+    id: "freelancer-crisis",
+    label: "Stressed Freelancer",
+    icon: Zap,
+    description: "Milestone tonight, flickering ISP, and overdue AWS invoice.",
+    text: "I need to submit my client development milestone by tonight, but my home internet is flickering, my AWS hosting invoice of $250 is overdue, and my main client just double-booked me for a live review tomorrow morning during my child's pediatric checkup.",
+    tasks: [
+      { id: "task-5", title: "Client Milestones Deployment", deadline: "Tonight, 11:59 PM", category: "assignment", urgency: "CRITICAL" },
+      { id: "task-6", title: "AWS Hosting Bill ($250)", deadline: "Tomorrow morning", category: "bill", urgency: "HIGH" },
+      { id: "task-7", title: "Live Client Milestone Review", deadline: "Tomorrow, 9:30 AM", category: "calendar", urgency: "HIGH" },
+      { id: "task-8", title: "Pediatric Doctor Checkup", deadline: "Tomorrow, 9:30 AM", category: "calendar", urgency: "CRITICAL" }
+    ]
+  },
+  {
+    id: "entrepreneur-crisis",
+    label: "Busy Parentpreneur",
+    icon: Layers,
+    description: "Midnight product launch, failed payment stream, supplier overlap.",
+    text: "My e-commerce launch is at midnight, but my baby has a pediatrician checkup tomorrow at 9 AM which overlaps with my supplier sync, and the automated inventory bill failed payment.",
+    tasks: [
+      { id: "task-9", title: "E-Commerce Launch Deployment", deadline: "Tonight, 12:00 AM", category: "assignment", urgency: "CRITICAL" },
+      { id: "task-10", title: "Inventory Restock Payment", deadline: "Tomorrow morning", category: "bill", urgency: "HIGH" },
+      { id: "task-11", title: "Supplier Shipping Sync", deadline: "Tomorrow, 9:00 AM", category: "calendar", urgency: "HIGH" }
+    ]
+  }
+];
+
+export default function App() {
+  const [showNotification, setShowNotification] = useState<string | null>(null);
+  const [activeScenario, setActiveScenario] = useState<string>("student-crisis");
+  const [customScenarioText, setCustomScenarioText] = useState<string>(SCENARIOS[0].text);
+  const [tasks, setTasks] = useState<Array<any>>(SCENARIOS[0].tasks);
+  
+  // New task form states
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskDeadline, setNewTaskDeadline] = useState("In 4 hours");
+  const [newTaskCategory, setNewTaskCategory] = useState<"assignment" | "bill" | "calendar">("assignment");
+  const [newTaskUrgency, setNewTaskUrgency] = useState<"CRITICAL" | "HIGH" | "MEDIUM">("HIGH");
+
+  // AI agent responses
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isScanningWorkspace, setIsScanningWorkspace] = useState(false);
+  const [evalResult, setEvalResult] = useState<any>(null);
+  const [logs, setLogs] = useState<string[]>([
+    "System initiated. Aheado Proactive Listeners standing by...",
+    "Ready to guard against student / professional / entrepreneur crisis events.",
+  ]);
+  const [activeTab, setActiveTab] = useState<"canvas" | "skills">("canvas");
+  const [selectedSkill, setSelectedSkill] = useState<string>("scraper");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [approvedIntercepts, setApprovedIntercepts] = useState<string[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<number | null>(null);
+
+  // Agentic execution modal state
+  const [selectedInterceptForExecution, setSelectedInterceptForExecution] = useState<any | null>(null);
+  const [isExecutionModalOpen, setIsExecutionModalOpen] = useState(false);
+
+  // Live Interception Terminal Console state
+  const [deadlineSafeScore, setDeadlineSafeScore] = useState(99.6);
+  const terminalContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Core view and connection states
+  const [viewMode, setViewMode] = useState<'landing' | 'login' | 'workspace'>('landing');
+  const [conn, setConn] = useState<GoogleConnectionState>({
+    isConnected: false,
+    accessToken: null,
+    userProfile: null
+  });
+  const [isHeaderVerifying, setIsHeaderVerifying] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+  const [showTokenInput, setShowTokenInput] = useState(false);
+
+  // Load connection state on mount
+  useEffect(() => {
+    const loaded = loadConnectionState();
+    setConn(loaded);
+  }, []);
+
+  const handleHeaderSignIn = async () => {
+    setIsHeaderVerifying(true);
+    setLogs(prev => ["[OAUTH] Launching Google Workspace popup via Navbar...", ...prev]);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        const loaded = loadConnectionState();
+        setConn(loaded);
+        setViewMode('workspace');
+        triggerToast(`🎉 Connected! Welcome, ${result.user.displayName || "User"}.`);
+        setLogs(prev => [`[WORKSPACE] Google sign-in successful: ${result.user.email}`, ...prev]);
+      }
+    } catch (error: any) {
+      console.error(error);
+      triggerToast(`❌ Authentication failed: ${error.message || "OAuth popup closed."}`);
+      setLogs(prev => [`[ERROR] Navbar Auth failed: ${error.message || "User cancelled."}`, ...prev]);
+    } finally {
+      setIsHeaderVerifying(false);
+    }
+  };
+
+  const handleBypassSignIn = () => {
+    const mockProfile = {
+      email: "mentor-review@aheado.io",
+      name: "Dr. Alex Mentor",
+      picture: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
+    };
+    applyManualDeveloperToken("mock-bypass-token-12345", mockProfile);
+    const newState = loadConnectionState();
+    setConn(newState);
+    setViewMode('workspace');
+    triggerToast("⚡ Logged in via Mentor/Judge Bypass mode!");
+    setLogs(prev => ["[WORKSPACE] Logged in under Mentor/Judge review channel.", ...prev]);
+  };
+
+  const handleHeaderSignOut = async () => {
+    await googleSignOut();
+    const reset = {
+      isConnected: false,
+      accessToken: null,
+      userProfile: null
+    };
+    setConn(reset);
+    setViewMode('landing');
+    triggerToast("🔌 Google Workspace disconnected.");
+    setLogs(prev => ["[WORKSPACE] Google account disconnected.", ...prev]);
+  };
+
+  const handleGetStartedClick = () => {
+    const isConnected = loadConnectionState().isConnected;
+    if (isConnected) {
+      setViewMode('workspace');
+      triggerToast("⚡ Navigated to your Active Workspace Canvas.");
+    } else {
+      setViewMode('login');
+      triggerToast("🔐 Please sign in with Google to unlock your Active Canvas.");
+    }
+  };
+
+  const handleManualTokenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = tokenInput.trim();
+    if (!token) return;
+
+    setIsHeaderVerifying(true);
+    setLogs(prev => [`[TOKEN] Connecting workspace using developer playground token.`, ...prev]);
+    try {
+      const profile = await fetchGoogleProfile(token);
+      applyManualDeveloperToken(token, profile);
+      const newState = loadConnectionState();
+      setConn(newState);
+      setTokenInput("");
+      setShowTokenInput(false);
+      setViewMode('workspace');
+      triggerToast(`⚡ Connected! Welcome ${profile.name}. Live Gmail & Calendar enabled.`);
+      setLogs(prev => [`[WORKSPACE] Live Google Workspace link verified: ${profile.email}`, ...prev]);
+    } catch (error: any) {
+      console.error(error);
+      triggerToast("❌ Token verification failed. Make sure the token is active.");
+      setLogs(prev => [`[ERROR] Direct token authentication failed. Token may be expired.`, ...prev]);
+    } finally {
+      setIsHeaderVerifying(false);
+    }
+  };
+
+  const eventTemplates = [
+    "[INTERCEPTED] Canvas Portal: Calculus III Assignment 5 due in 12 hours. Generating interactive markdown study guide...",
+    "[AUTOPILOT] Pre-drafted formal email block to Professor Sharma requesting a 24-hour extension due to verified calendar overlap.",
+    "[RESOLVED] Automated Stripe Gateway: Internet utility bill routing cleared instantly to avoid incoming late fee structures.",
+    "[INTERCEPTED] Jira Dashboard: Q4 Product Launch deck milestone due tomorrow. Initializing structural skeleton slides...",
+    "[MITIGATION] Google Calendar: Conflicting professional interview invitations found. Rescheduling low-priority blocks dynamically.",
+    "[MONITORING] Scanning connected workspaces. Ambient agent arrays reporting 0 tasks at risk."
+  ];
+
+  const [eventLogs, setEventLogs] = useState<Array<{ time: string; text: string }>>([
+    { time: "07:01:10", text: "[MONITORING] Scanning connected workspaces. Ambient agent arrays reporting 0 tasks at risk." },
+    { time: "07:02:15", text: "[RESOLVED] Automated Stripe Gateway: Internet utility bill routing cleared instantly to avoid incoming late fee structures." }
+  ]);
+
+  // Micro-fluctuate Deadline-Safe Score every 3 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const randomValue = 98.5 + Math.random() * (100.0 - 98.5);
+      setDeadlineSafeScore(parseFloat(randomValue.toFixed(1)));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Append new log entry to bottom of feed every 4 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0];
+      setEventLogs(prev => {
+        const nextIdx = prev.length % eventTemplates.length;
+        const text = eventTemplates[nextIdx];
+        return [...prev, { time: timeStr, text }];
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Scroll to bottom of terminal internally whenever eventLogs updates to prevent browser page-jumping
+  useEffect(() => {
+    if (terminalContainerRef.current) {
+      terminalContainerRef.current.scrollTo({
+        top: terminalContainerRef.current.scrollHeight,
+        behavior: "smooth"
+      });
+    }
+  }, [eventLogs]);
+
+  // Smooth scroll reference
+  const canvasSectionRef = useRef<HTMLDivElement | null>(null);
+
+  // Trigger brief alert notification
+  const triggerToast = (message: string) => {
+    setShowNotification(message);
+    setTimeout(() => {
+      setShowNotification(null);
+    }, 4000);
+  };
+
+  // Switch scenario preset
+  const handleSelectPreset = (scenarioId: string) => {
+    const found = SCENARIOS.find(s => s.id === scenarioId);
+    if (found) {
+      setActiveScenario(scenarioId);
+      setCustomScenarioText(found.text);
+      setTasks(found.tasks);
+      setLogs(prev => [
+        `Loaded Preset Scenario: ${found.label}`,
+        `Populated ${found.tasks.length} time-sensitive danger tasks.`,
+        ...prev.slice(0, 10)
+      ]);
+      setEvalResult(null);
+    }
+  };
+
+  // Add custom task to list
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskTitle.trim()) return;
+
+    const newTask = {
+      id: `custom-${Date.now()}`,
+      title: newTaskTitle,
+      deadline: newTaskDeadline,
+      category: newTaskCategory,
+      urgency: newTaskUrgency
+    };
+
+    setTasks(prev => [newTask, ...prev]);
+    setNewTaskTitle("");
+    setLogs(prev => [
+      `User injected manual task: "${newTask.title}" [Urgency: ${newTask.urgency}]`,
+      ...prev
+    ]);
+    triggerToast("⚡ Custom threat task queued inside active canvas!");
+  };
+
+  // Remove task from list
+  const handleRemoveTask = (taskId: string) => {
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    setLogs(prev => [
+      `Removed task ID: ${taskId} from threat buffer.`,
+      ...prev
+    ]);
+  };
+
+  // Call server-side Gemini Proactive Intercept Engine
+  const executeAIEngine = async () => {
+    setIsEvaluating(true);
+    setEvalResult(null);
+    setLogs(prev => [
+      "⚡ BOOTING INTERCEPT GUARD SENSORS...",
+      "Connecting to Aheado full-stack server middleware...",
+      "Sending active context, scenario state & portal parameters to Gemini-3.5-Flash...",
+      ...prev
+    ]);
+
+    try {
+      const response = await fetch("/api/proactive-ai/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scenario: customScenarioText,
+          tasks: tasks
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setEvalResult(data);
+        setLogs(prev => [
+          `✅ AI Sensor analysis complete. Calculated risk score: ${data.riskScore}/100.`,
+          `Successfully staged ${data.intercepts?.length || 0} critical emergency shields.`,
+          "Logs updated with micro-action scripts.",
+          ...prev
+        ]);
+        triggerToast("🎉 Aheado Proactive Agent generated active shields!");
+      } else {
+        throw new Error(data.error || "Failed evaluating");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setLogs(prev => [
+        "❌ Server evaluation pipeline failed. Reverting to local fallback core...",
+        ...prev
+      ]);
+      // Fail-safe mock generation if server is offline or key fails
+      const fallbackData = {
+        riskScore: 92,
+        summary: "Emergency Shield Active. Local heuristic engine intercepted portal deadlines, draft outline stages, and scheduled reschedules.",
+        intercepts: [
+          {
+            id: "fb-1",
+            title: "Crisis Course Outline Draft",
+            description: "Scans assignments & generates emergency solutions structure to prevent missing completion windows.",
+            category: "assignment",
+            urgency: "CRITICAL",
+            actionTaken: "Aheado drafted a 4-step framework study guide.",
+            outputDraft: "📚 EMERGENCY STUDY PLAN:\n\n- Key Thesis: Fast prototyping with Express and React.\n- Framework Code: Setup standard middleware on port 3000.\n- Staged Action: Generated placeholder outline to submit instantly."
+          }
+        ],
+        reassurance: "Aheado has you protected offline. Staged backup successfully."
+      };
+      setEvalResult(fallbackData);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  // Autonomous, real-time Gmail & Calendar scanning engine
+  const executeLiveWorkspaceScan = async () => {
+    setIsScanningWorkspace(true);
+    setIsEvaluating(true);
+    setEvalResult(null);
+    setLogs(prev => [
+      "📡 CONNECTING TO AMBIENT WORKSPACE LISTENERS...",
+      "Initiating real-time continuous scan of your active Gmail inbox...",
+      "Initiating real-time continuous scan of your Google Calendar events...",
+      ...prev
+    ]);
+
+    try {
+      let eventsData: SimpleCalendarEvent[] = [];
+      let emailsData: SimpleGmailMessage[] = [];
+
+      // Check if we have a valid live workspace connection token
+      const currentConn = loadConnectionState();
+      if (currentConn.isConnected && currentConn.accessToken) {
+        setLogs(prev => [
+          "🔗 Found authenticated Workspace. Fetching live schedules & messages...",
+          ...prev
+        ]);
+        try {
+          eventsData = await fetchCalendarEvents(currentConn.accessToken);
+          emailsData = await fetchLatestEmails(currentConn.accessToken);
+          setLogs(prev => [
+            `📥 Retrieved ${eventsData.length} upcoming Calendar events.`,
+            `📥 Retrieved ${emailsData.length} recent Gmail message threads.`,
+            ...prev
+          ]);
+        } catch (authErr: any) {
+          console.error("Live fetch error", authErr);
+          setLogs(prev => [
+            `⚠️ Live token read failed: ${authErr.message || authErr}. Using high-quality bypass buffer instead...`,
+            ...prev
+          ]);
+        }
+      } else {
+        setLogs(prev => [
+          "ℹ️ Running in Sandbox Preview channel. Spawning autonomous test scenario...",
+          ...prev
+        ]);
+      }
+
+      // If both are empty (either due to sandbox/mock or clean inbox/calendar), we pre-populate with the exact real-world scenario the user requested to demonstrate:
+      if (eventsData.length === 0 && emailsData.length === 0) {
+        setLogs(prev => [
+          "⚡ Simulated live clash scenario generated inside workspace stream!",
+          "Event Found on Calendar: 'Pediatric Doctor Checkup' tomorrow at 2:30 PM",
+          "Email Found in Inbox: From 'interviewer@techcorp.com' with Subject 'Technical Interview Proposal' proposing tomorrow at 2:30 PM",
+          ...prev
+        ]);
+        
+        eventsData = [{
+          id: "evt-doctor-checkup",
+          summary: "Pediatric Doctor Checkup",
+          start: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + "T14:30:00",
+          end: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + "T15:30:00"
+        }];
+
+        emailsData = [{
+          id: "msg-interview-clash",
+          from: "hr@globaltech.com (Jessica Moore)",
+          subject: "Final Interview Scheduled - Sumith Shetty",
+          date: new Date().toUTCString(),
+          snippet: "Hi Sumith, we are thrilled to move you to the next round. We have scheduled your technical interview for tomorrow at 2:30 PM (14:30). Please confirm."
+        }];
+      }
+
+      // Prepare the constructed scenario prompt for Gemini
+      const constructedScenario = `
+[REAL-TIME WORKSPACE DETECTED STATE]
+We scanned the user's active workspace and detected the following resources.
+
+ACTIVE CALENDAR EVENTS:
+${eventsData.map(e => `- "${e.summary}" from ${e.start} to ${e.end}`).join("\n")}
+
+LATEST INBOX EMAILS:
+${emailsData.map(m => `- FROM: ${m.from}\n  SUBJECT: ${m.subject}\n  SNIPPET: ${m.snippet}`).join("\n")}
+
+Does this state present any active conflicts (e.g. overlapping events, a calendar event clashing with an email-scheduled appointment, or an urgent assignment deadline)? 
+If yes, generate the specific "Automated Calendar Decoupler" intercept or relevant shields to automatically resolve it.
+      `.trim();
+
+      // Update text area to show what was autonomously parsed
+      setCustomScenarioText(constructedScenario);
+
+      // Fetch from API
+      const response = await fetch("/api/proactive-ai/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scenario: constructedScenario,
+          tasks: tasks
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setEvalResult(data);
+        setLogs(prev => [
+          `🛡️ AUTONOMOUS INTERCEPT COMPLETE. Risk Score: ${data.riskScore}/100`,
+          `Detected conflict, generated ${data.intercepts?.length || 0} smart shields automatically.`,
+          "No user input required. Aheado successfully guarded your schedule.",
+          ...prev
+        ]);
+        triggerToast("🎉 Aheado identified the clash & staged shields autonomously!");
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setLogs(prev => [
+        "❌ Autonomous scanner fallback invoked...",
+        ...prev
+      ]);
+      
+      // Dynamic fallback specifically tailored to the doctor-checkup interview conflict!
+      const simulatedOverlapData = {
+        riskScore: 94,
+        summary: "CRITICAL COLLISION DETECTED: Your 'Pediatric Doctor Checkup' tomorrow at 2:30 PM directly conflicts with an incoming 'Technical Interview Scheduled' email for tomorrow at 2:30 PM.",
+        intercepts: [
+          {
+            id: "int-live-decoupler",
+            title: "Automated Calendar Decoupler",
+            description: "Aheado detected a double-booking: 'Pediatric Doctor Checkup' vs 'Technical Interview' at 2:30 PM. Staging email rescheduling shift.",
+            category: "calendar",
+            urgency: "CRITICAL",
+            actionTaken: "Pre-drafted scheduling shift proposal sent to interviewer.",
+            outputDraft: "✉️ PROPOSAL NOTIFICATION:\n\nSubject: Rescheduling Request: Final Interview - Sumith Shetty\n\nDear Jessica,\n\nThank you for scheduling the technical interview. I have an unavoidable pre-existing medical commitment tomorrow at 2:30 PM.\n\nCould we reschedule to tomorrow at 4:00 PM, or Monday at 11:00 AM instead?\n\nThank you for your flexibility.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)"
+          }
+        ],
+        reassurance: "Relax, Aheado caught the collision. Your schedule is decoupled successfully."
+      };
+      setEvalResult(simulatedOverlapData);
+    } finally {
+      setIsEvaluating(false);
+      setIsScanningWorkspace(false);
+    }
+  };
+
+  // Helper to copy text to clipboard
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    triggerToast("📋 Action script copied to clipboard!");
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // Approve action to simulate full automation
+  const approveAction = (id: string) => {
+    if (approvedIntercepts.includes(id)) return;
+    
+    // Find intercept
+    const found = evalResult?.intercepts?.find((item: any) => item.id === id);
+    if (found) {
+      setSelectedInterceptForExecution(found);
+      setIsExecutionModalOpen(true);
+    } else {
+      // Fallback if not found in evalResult (e.g. from static initial states if any)
+      setApprovedIntercepts(prev => [...prev, id]);
+      triggerToast("🛡️ Intercept Guard deployed!");
+    }
+  };
+
+  const handleExecutionSuccess = (id: string) => {
+    if (!approvedIntercepts.includes(id)) {
+      setApprovedIntercepts(prev => [...prev, id]);
+    }
+  };
+
+  // Handle smooth scroll
+  const scrollToCanvas = () => {
+    canvasSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+    setLogs(prev => ["Scrolled into Active Workspace canvas view.", ...prev]);
+  };
+
+  const scrollToId = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth" });
+      setLogs(prev => [`Navigating to ${id === "architecture" ? "Core Architecture Specs" : "Pricing Horizon"} section.`, ...prev]);
+    }
+  };
+
+  // Pre-generate symmetrical row of 48 fluid column bars for Saas-V graph
+  const barsCount = 48;
+  const bars = Array.from({ length: barsCount }, (_, i) => {
+    const center = 23.5;
+    const dist = Math.abs(i - center);
+    const normDist = dist / 23.5;
+    // Quadratic scaling out from center (V-shape) with higher base and multiplier so they go high
+    const heightPercent = 18 + Math.pow(normDist, 1.8) * 82;
+    return {
+      index: i,
+      dist,
+      heightPercent
+    };
+  });
+
+  return (
+    <div className="min-h-screen bg-brand-bg font-sans text-stone-900 selection:bg-brand-primary selection:text-white relative overflow-x-hidden">
+      
+      {/* CSS Keyframes for beautiful dynamic animations */}
+      <style>{`
+        @keyframes float-bar {
+          0%, 100% {
+            transform: scaleY(1);
+            opacity: 0.25;
+          }
+          50% {
+            transform: scaleY(1.45);
+            opacity: 0.95;
+          }
+        }
+        @keyframes pulse-ring {
+          0% { transform: scale(0.95); opacity: 0.4; }
+          50% { transform: scale(1.05); opacity: 0.8; }
+          100% { transform: scale(0.95); opacity: 0.4; }
+        }
+        @keyframes scroll-loop {
+          0% { transform: translateY(0); opacity: 0.3; }
+          50% { transform: translateY(8px); opacity: 1; }
+          100% { transform: translateY(0); opacity: 0.3; }
+        }
+        @keyframes scroll-mouse {
+          0% { transform: translateY(0); opacity: 1; }
+          50% { transform: translateY(6px); opacity: 1; }
+          100% { transform: translateY(12px); opacity: 0; }
+        }
+        .glow-radial {
+          background: radial-gradient(circle, rgba(249, 115, 22, 0.14) 0%, rgba(0, 0, 0, 0) 70%);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #27272a;
+          border-radius: 9999px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #f97316;
+        }
+      `}</style>
+
+      {/* Floating Pill Navigation Bar */}
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-6xl z-50">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 sm:py-3.5 rounded-full border border-brand-border bg-brand-surface/90 backdrop-blur-[12px] shadow-[0_8px_30px_rgba(92,88,82,0.08)]">
+          
+          {/* Logo & Text */}
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setViewMode('landing'); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-brand-primary flex items-center justify-center shadow-[0_0_15px_rgba(249,115,22,0.5)]">
+              <Zap className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 text-white fill-white" />
+            </div>
+            <span className="text-stone-900 font-extrabold tracking-[0.2em] text-sm sm:text-lg font-sans">
+              AHEADO
+            </span>
+          </div>
+
+          {/* Links (Hidden on small screens) */}
+          <div className="hidden md:flex items-center gap-8 text-sm font-medium text-brand-text-secondary">
+            <button 
+              onClick={() => { 
+                setViewMode('landing'); 
+                setTimeout(() => scrollToId("terminal"), 100); 
+              }} 
+              className="hover:text-brand-primary transition-colors cursor-pointer"
+            >
+              Live Simulator
+            </button>
+            <button 
+              onClick={() => { 
+                setViewMode('landing'); 
+                setTimeout(() => scrollToId("architecture"), 100); 
+              }} 
+              className="hover:text-brand-primary transition-colors cursor-pointer"
+            >
+              Architecture
+            </button>
+            <button 
+              onClick={() => { 
+                setViewMode('landing'); 
+                setTimeout(() => scrollToId("pricing"), 100); 
+              }} 
+              className="hover:text-brand-primary transition-colors cursor-pointer"
+            >
+              Pricing
+            </button>
+          </div>
+
+          {/* CTA Buttons */}
+          <div className="flex items-center gap-2">
+            {conn.isConnected ? (
+              <>
+                <button
+                  onClick={() => { setViewMode('workspace'); }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-brand-primary text-white font-semibold text-[10px] sm:text-xs hover:bg-brand-accent active:scale-95 transition-all shadow-[0_4px_14px_rgba(249,115,22,0.3)] cursor-pointer"
+                >
+                  Active Canvas
+                </button>
+                <button
+                  onClick={handleHeaderSignOut}
+                  className="px-2.5 sm:px-3 py-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 font-semibold text-[10px] sm:text-xs active:scale-95 transition-all cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setViewMode('login'); }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-brand-border bg-brand-surface/50 hover:bg-brand-surface text-stone-800 font-semibold text-[10px] sm:text-xs active:scale-95 transition-all cursor-pointer"
+                >
+                  Login
+                </button>
+                <button 
+                  onClick={handleGetStartedClick}
+                  className="px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full bg-brand-primary text-white font-semibold text-[10px] sm:text-xs hover:bg-brand-accent active:scale-95 transition-all shadow-[0_4px_14px_rgba(249,115,22,0.3)] cursor-pointer"
+                >
+                  Get Started
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {showNotification && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: -20, x: "-50%" }}
+            className="fixed top-24 left-1/2 z-50 bg-brand-surface border border-brand-border text-stone-900 px-5 py-3 rounded-xl flex items-center gap-3 shadow-[0_10px_25px_rgba(92,88,82,0.12)] font-medium text-xs md:text-sm max-w-[90vw] text-center"
+          >
+            <Sparkles className="w-4 h-4 text-brand-primary animate-pulse shrink-0" />
+            <span>{showNotification}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {viewMode === 'landing' && (
+        <>
+          {/* TOP HERO WRAPPER - exactly h-[850px] with central orange radial glow & V-bars graph */}
+          <header className="relative w-full h-[850px] flex flex-col justify-between items-center pt-36 pb-12 overflow-hidden border-b border-brand-border/20">
+        
+        {/* Central Radial Glow Layer */}
+        <div className="absolute inset-0 glow-radial pointer-events-none z-0" />
+
+        {/* 48 Fluid Column Bars symmetrically scaling quadratically out from center */}
+        <div className="absolute bottom-12 left-0 right-0 h-[380px] sm:h-[420px] md:h-[480px] lg:h-[520px] w-full flex items-end justify-between px-3 sm:px-6 md:px-10 lg:px-14 gap-0.5 sm:gap-1 pointer-events-none z-0 overflow-hidden">
+          {bars.map((bar) => {
+            // Symmetrically reduce density on mobile and tablet to prevent narrow crowding
+            let responsiveClasses = "flex-1 max-w-[6px] sm:max-w-[10px] md:max-w-[14px] lg:max-w-[16px] rounded-t-full transition-all duration-300";
+            if (bar.index % 4 !== 0) {
+              responsiveClasses += " hidden lg:block";
+            } else if (bar.index % 2 !== 0) {
+              responsiveClasses += " hidden sm:block";
+            }
+            return (
+              <div
+                key={bar.index}
+                className={responsiveClasses}
+                style={{
+                  height: `${bar.heightPercent}%`,
+                  background: "linear-gradient(to top, #FAF6F0 0%, #ea580c 35%, #f97316 60%, #ffedd5 85%, rgba(0, 0, 0, 0) 100%)",
+                  animation: "float-bar 4.5s ease-in-out infinite",
+                  animationDelay: `${bar.dist * 0.12}s`,
+                  transformOrigin: "bottom"
+                }}
+              />
+            );
+          })}
+        </div>
+
+        {/* Centered Hero Area Content */}
+        <div className="max-w-4xl text-center px-4 z-10 flex flex-col items-center mt-8">
+          
+          {/* Primary Header */}
+          <h1 className="text-4xl sm:text-6xl md:text-7.5xl font-extrabold tracking-tight text-stone-900 mb-6 uppercase text-center font-sans leading-[1.05]">
+            DEADLINES MUTED. <br />
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-primary via-orange-500 to-amber-500">
+              ACTIONS EXECUTED IN REAL TIME.
+            </span>
+          </h1>
+
+          {/* Descriptive Sub-header */}
+          <p className="text-base sm:text-lg md:text-xl text-gray-700 max-w-3xl leading-relaxed mb-10 font-serif tracking-wide italic font-medium">
+            Aheado intercepts critical portal deadlines, automated bill streams, and calendar conflicts for high-intensity individuals before they turn red. Our background agents stage emergency actions, outlines, and reschedules while you focus on what counts.
+          </p>
+
+          {/* Hero Buttons */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
+            <button 
+              onClick={() => { 
+                if (conn.isConnected) {
+                  setViewMode('workspace');
+                  setActiveTab("canvas");
+                } else {
+                  setViewMode('login');
+                  triggerToast("🔐 Sign in with Google to access your Active Canvas.");
+                }
+              }}
+              className="w-full sm:w-auto px-8 py-4 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-accent transition-all flex items-center justify-center gap-2 shadow-[0_10px_25px_rgba(249,115,22,0.25)] hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer"
+            >
+              Launch Active Canvas
+              <ArrowRight className="w-5 h-5 text-white" />
+            </button>
+            <button 
+              onClick={() => { 
+                if (conn.isConnected) {
+                  setViewMode('workspace');
+                  setActiveTab("skills");
+                } else {
+                  setViewMode('login');
+                  triggerToast("🔐 Sign in with Google to explore the Skills Engine.");
+                }
+              }}
+              className="w-full sm:w-auto px-8 py-4 rounded-lg border border-brand-border bg-brand-surface text-stone-900 font-semibold hover:border-brand-primary hover:bg-brand-bg transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer animate-none"
+            >
+              Explore Skills Engine
+              <Sparkles className="w-4 h-4 text-brand-primary" />
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom mouse-scroll loop animator - styled beautifully as a real physical mouse controller layered above the bars */}
+        <div className="relative z-20 flex flex-col items-center gap-3 text-stone-600 hover:text-brand-primary transition-colors text-xs font-medium cursor-pointer select-none mb-6 group" onClick={handleGetStartedClick}>
+          <span className="font-mono tracking-widest text-[10px] md:text-xs font-extrabold text-stone-500 uppercase group-hover:text-brand-primary transition-colors">EXPLORE CANVAS</span>
+          <div className="w-10 h-16 rounded-3xl border-2 border-stone-300/80 bg-stone-50/80 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] p-2 flex justify-center items-start transition-all duration-300 group-hover:border-brand-primary/40 group-hover:shadow-[0_8px_30px_rgba(249,115,22,0.08)]">
+            <div className="w-1.5 h-3.5 rounded-full bg-brand-primary" style={{ animation: "scroll-mouse 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite" }} />
+          </div>
+        </div>
+
+      </header>
+
+      {/* LIVE INTERCEPTION TERMINAL CONSOLE */}
+      <section id="terminal" className="max-w-7xl mx-auto px-4 md:px-8 pt-6 pb-12 relative z-10 w-full">
+        <div className="p-6 md:p-8 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-[16px] shadow-[0_24px_64px_rgba(0,0,0,0.8)] relative overflow-hidden">
+          
+          {/* Subtle decoration elements */}
+          <div className="absolute top-0 left-0 w-24 h-[1px] bg-gradient-to-r from-brand-primary to-transparent" />
+          <div className="absolute top-0 right-0 w-24 h-[1px] bg-gradient-to-l from-brand-accent to-transparent" />
+          
+          {/* Header Title with premium badge */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-6 border-b border-brand-border/40">
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-brand-primary animate-pulse" />
+                <span className="text-xs font-bold text-brand-primary uppercase tracking-widest font-mono">
+                  Real-time Safeguard Pipeline
+                </span>
+              </div>
+              <h2 className="text-xl md:text-2xl font-extrabold tracking-tight text-stone-900 uppercase font-sans">
+                Live Interception Terminal Console
+              </h2>
+            </div>
+            <div className="flex items-center gap-2 bg-stone-100 px-3.5 py-1.5 rounded-lg border border-stone-200 text-[11px] font-mono text-stone-600">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>STAGED PROTOCOLS ONLINE</span>
+            </div>
+          </div>
+
+          {/* Top Metrics Bar: 3 grid items */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            
+            {/* Metric 1 */}
+            <div className="p-4.5 rounded-lg bg-orange-50/60 border border-orange-200 flex flex-col justify-between relative overflow-hidden group hover:border-brand-primary/40 transition-all shadow-sm">
+              <div className="absolute top-0 right-0 p-3 text-brand-primary/10 group-hover:text-brand-primary/20 transition-colors">
+                <Clock className="w-12 h-12 stroke-[1]" />
+              </div>
+              <div className="text-[10px] font-bold text-orange-800 uppercase tracking-widest font-mono mb-1.5">
+                Deadline-Safe Score
+              </div>
+              <div className="text-2xl md:text-3xl font-extrabold text-stone-900 tracking-tight font-sans flex items-baseline gap-1">
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-primary to-orange-500 font-sans">
+                  {deadlineSafeScore}%
+                </span>
+                <span className="text-xs font-semibold text-emerald-600 font-sans ml-1">Protected</span>
+              </div>
+              <p className="text-[10px] text-stone-500 mt-2 font-mono">
+                Micro-fluctuations active • Real-time guard ratio
+              </p>
+            </div>
+
+            {/* Metric 2 */}
+            <div className="p-4.5 rounded-lg bg-sky-50/90 border border-sky-200 flex flex-col justify-between relative overflow-hidden group hover:border-brand-primary/50 transition-all shadow-sm">
+              <div className="absolute top-0 right-0 p-3 text-sky-900/15 group-hover:text-sky-900/25 transition-colors">
+                <Layers className="w-12 h-12 stroke-[1]" />
+              </div>
+              <div className="text-[10px] font-bold text-sky-800 uppercase tracking-widest font-mono mb-1.5">
+                Active Portal Sync
+              </div>
+              <div className="text-sm font-bold text-sky-950 tracking-wide font-sans flex items-center gap-2 h-9">
+                <span className="text-sky-950 font-sans font-extrabold truncate">Canvas, Slack, Stripe, Jira OK</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-ping shrink-0" />
+              </div>
+              <p className="text-[10px] text-sky-800/80 mt-2 font-mono">
+                Listening for portal API streams • 120ms latency
+              </p>
+            </div>
+
+            {/* Metric 3 */}
+            <div className="p-4.5 rounded-lg bg-stone-50/80 border border-stone-200 flex flex-col justify-between relative overflow-hidden group hover:border-brand-primary/30 transition-all shadow-sm">
+              <div className="absolute top-0 right-0 p-3 text-stone-400/20 group-hover:text-brand-primary/20 transition-colors">
+                <Zap className="w-12 h-12 stroke-[1]" />
+              </div>
+              <div className="text-[10px] font-bold text-stone-600 uppercase tracking-widest font-mono mb-1.5">
+                Autopilot Mode
+              </div>
+              <div className="flex items-center h-9">
+                <span className="px-3.5 py-1.5 rounded-full bg-brand-primary/10 border border-brand-primary/30 text-[10px] font-bold text-brand-primary tracking-wider uppercase shadow-sm flex items-center gap-1.5 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-primary animate-pulse" />
+                  Active Intercept
+                </span>
+              </div>
+              <p className="text-[10px] text-stone-500 mt-2 font-mono">
+                Autonomous system intervention enabled
+              </p>
+            </div>
+
+          </div>
+
+          {/* Automated Event Stream console */}
+          <div className="rounded-lg border border-stone-850 bg-stone-900 p-5 relative shadow-inner">
+            
+            {/* Window controls styling like macOS */}
+            <div className="flex items-center justify-between pb-3.5 mb-3.5 border-b border-stone-800">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-brand-primary/80" />
+                <span className="w-2.5 h-2.5 rounded-full bg-brand-accent/80" />
+                <span className="w-2.5 h-2.5 rounded-full bg-stone-600" />
+                <span className="text-[10px] text-stone-400 font-mono font-bold ml-2 uppercase tracking-widest">
+                  automated_event_stream_stdout
+                </span>
+              </div>
+              <div className="text-[10px] text-stone-400 font-mono">
+                POLLING INTERNAL AGENTS
+              </div>
+            </div>
+
+            {/* Scrollable event log body */}
+            <div ref={terminalContainerRef} className="h-48 overflow-y-auto pr-2 flex flex-col gap-2.5 font-mono text-[11px] md:text-xs leading-relaxed custom-scrollbar text-left scroll-smooth">
+              {eventLogs.map((log, idx) => {
+                let textClass = "text-stone-300";
+                if (log.text.startsWith("[INTERCEPTED]")) textClass = "text-brand-primary font-bold";
+                else if (log.text.startsWith("[AUTOPILOT]")) textClass = "text-orange-400 font-medium";
+                else if (log.text.startsWith("[RESOLVED]")) textClass = "text-emerald-400 font-bold";
+                else if (log.text.startsWith("[MITIGATION]")) textClass = "text-sky-400 font-medium";
+                else if (log.text.startsWith("[MONITORING]")) textClass = "text-stone-400";
+
+                return (
+                  <div key={idx} className="flex items-start gap-2 border-b border-stone-800/60 pb-1.5">
+                    <span className="text-stone-500 shrink-0 select-none">[{log.time}]</span>
+                    <span className={textClass}>{log.text}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+        </>
+      )}
+
+      {viewMode === 'workspace' && (
+        <>
+          {/* DETAILED ACTIVE WORKSPACE AREA */}
+          <section ref={canvasSectionRef} className="max-w-7xl mx-auto px-4 md:px-8 py-20 relative z-10">
+        
+        {/* Navigation Tab for active sections */}
+        <div className="flex items-center justify-center mb-12 px-4 w-full">
+          <div className="flex bg-brand-surface p-1 rounded-lg border border-brand-border w-full max-w-md sm:w-auto">
+            <button 
+              onClick={() => setActiveTab("canvas")}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2.5 px-3 sm:px-6 py-2 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                activeTab === "canvas" 
+                  ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20" 
+                  : "text-brand-text-secondary hover:text-stone-900"
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5 sm:w-4 h-4 shrink-0" />
+              <span className="truncate">Active Canvas</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab("skills")}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2.5 px-3 sm:px-6 py-2 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                activeTab === "skills" 
+                  ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20" 
+                  : "text-brand-text-secondary hover:text-stone-900"
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5 sm:w-4 h-4 shrink-0" />
+              <span className="truncate">Skills Engine</span>
+            </button>
+          </div>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {activeTab === "canvas" ? (
+            <motion.div
+              key="canvas-tab"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+              className="flex flex-col gap-6"
+            >
+              <GoogleWorkspaceConsole 
+                onConnectionChange={(newConn) => setConn(newConn)}
+                triggerToast={triggerToast} 
+                addSystemLog={(log) => setLogs(prev => [log, ...prev])} 
+              />
+              
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              
+              {/* LEFT COLUMN: Threat Simulator Studio & Input Controls (5 Cols) */}
+              <div className="lg:col-span-5 flex flex-col gap-6">
+                
+                {/* Preset Scenario Selectors */}
+                <div className="p-6 rounded-lg border border-brand-border bg-brand-surface relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-brand-primary" />
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2 font-sans">
+                    <Sliders className="w-5 h-5 text-brand-primary" />
+                    Crisis Presets Studio
+                  </h3>
+                  <p className="text-brand-text-secondary text-xs mb-4">
+                    Choose an emergency preset context to auto-populate the active timeline, then execute.
+                  </p>
+
+                  <div className="flex flex-col gap-3">
+                    {SCENARIOS.map((scen) => {
+                      const IconComp = scen.icon;
+                      const isActive = activeScenario === scen.id;
+                      return (
+                        <button
+                          key={scen.id}
+                          onClick={() => handleSelectPreset(scen.id)}
+                          className={`w-full p-3.5 rounded-lg border flex items-start gap-3 text-left transition-all relative cursor-pointer ${
+                            isActive 
+                              ? "bg-brand-primary/[0.06] border-brand-primary shadow-sm" 
+                              : "bg-stone-50/70 border-stone-200 hover:border-brand-primary/30 hover:bg-stone-100/70"
+                          }`}
+                        >
+                          <div className={`p-2 rounded-lg shrink-0 ${isActive ? "bg-brand-primary/20 text-brand-primary" : "bg-stone-200/50 text-stone-600"}`}>
+                            <IconComp className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className={`text-xs font-bold uppercase tracking-wider ${isActive ? "text-brand-primary" : "text-stone-800"}`}>{scen.label}</div>
+                            <div className={`text-[11px] mt-0.5 line-clamp-1 ${isActive ? "text-brand-accent/90" : "text-stone-500"}`}>{scen.description}</div>
+                          </div>
+                          {isActive && (
+                            <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-brand-primary animate-ping" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Scenario Details Editor */}
+                <div className="p-6 rounded-lg border border-brand-border bg-brand-surface">
+                  <h3 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest mb-3 font-mono">
+                    Scenario Narrative Studio
+                  </h3>
+                  <textarea
+                    value={customScenarioText}
+                    onChange={(e) => setCustomScenarioText(e.target.value)}
+                    rows={4}
+                    placeholder="Describe your current multi-tasking emergency (deadlines, overlapping bookings, overdue items)..."
+                    className="w-full bg-black border border-brand-border rounded-lg p-3 text-xs md:text-sm text-white focus:outline-none focus:border-brand-primary transition-all font-sans leading-relaxed resize-none"
+                  />
+                  <div className="text-[10px] text-brand-text-secondary mt-2 flex items-center gap-1 font-mono">
+                    <Sparkles className="w-3.5 h-3.5 text-brand-primary shrink-0" />
+                    <span>Aheado dynamically processes this narrative to generate intercepts.</span>
+                  </div>
+                </div>
+
+                {/* Manual Task Injector */}
+                <div className="p-6 rounded-lg border border-brand-border bg-brand-surface">
+                  <h3 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest mb-4 font-mono">
+                    Threat Buffer Task List ({tasks.length})
+                  </h3>
+
+                  {/* Add task simple inline form */}
+                  <form onSubmit={handleAddTask} className="flex flex-col gap-3 mb-4">
+                    <input
+                      type="text"
+                      placeholder="Add custom task (e.g. History paper)"
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      className="w-full bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-primary text-stone-900 placeholder:text-stone-400"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-stone-500 block mb-1 font-mono">Deadline/Time</label>
+                        <input
+                          type="text"
+                          value={newTaskDeadline}
+                          onChange={(e) => setNewTaskDeadline(e.target.value)}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-1.5 text-[11px] focus:outline-none focus:border-brand-primary text-stone-900 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-stone-500 block mb-1 font-mono">Category</label>
+                        <select
+                          value={newTaskCategory}
+                          onChange={(e: any) => setNewTaskCategory(e.target.value)}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-1.5 text-[11px] focus:outline-none focus:border-brand-primary text-stone-900 font-mono"
+                        >
+                          <option value="assignment">Assignment</option>
+                          <option value="bill">Bill Stream</option>
+                          <option value="calendar">Calendar</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2 rounded-lg bg-brand-primary hover:bg-brand-accent text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus className="w-4.5 h-4.5" /> Inject Threat Item
+                    </button>
+                  </form>
+
+                  {/* Tasks list mapping */}
+                  <div className="max-h-[220px] overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">
+                    {tasks.map((task) => (
+                      <div 
+                        key={task.id}
+                        className="p-3 rounded-lg bg-stone-50 border border-stone-200/80 flex items-center justify-between group transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          {task.category === "assignment" && <FileText className="w-4 h-4 text-emerald-500 shrink-0" />}
+                          {task.category === "bill" && <CreditCard className="w-4 h-4 text-amber-500 shrink-0" />}
+                          {task.category === "calendar" && <Calendar className="w-4 h-4 text-brand-primary shrink-0" />}
+                          <div>
+                            <div className="text-xs font-semibold text-stone-900 line-clamp-1">{task.title}</div>
+                            <div className="text-[10px] text-stone-500 flex items-center gap-1.5 mt-0.5">
+                              <span className="text-brand-primary font-medium font-mono">{task.deadline}</span>
+                              <span>•</span>
+                              <span className={`font-semibold font-mono ${task.urgency === "CRITICAL" ? "text-rose-600" : "text-amber-600"}`}>
+                                {task.urgency}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveTask(task.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-brand-text-secondary hover:text-rose-400 hover:bg-rose-500/10 transition-all shrink-0 cursor-pointer"
+                          title="Delete task"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {tasks.length === 0 && (
+                      <div className="text-center py-6 text-brand-text-secondary text-xs">
+                        No active tasks in buffer. Add some above.
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+
+              </div>
+
+              {/* RIGHT COLUMN: Active Canvas execution output area (7 Cols) */}
+              <div className="lg:col-span-7 flex flex-col gap-6">
+                
+                {/* Active Core Controls */}
+                <div className="p-6 rounded-lg bg-brand-surface border border-brand-border flex flex-col items-start gap-5 shadow-[0_15px_40px_rgba(0,0,0,0.6)]">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-brand-primary animate-pulse" />
+                      <span className="text-xs font-bold text-brand-primary uppercase tracking-widest font-mono">
+                        Aheado Agent Core Active
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-bold text-white font-sans">
+                      Proactive Intercept Guard Engine
+                    </h3>
+                    <p className="text-xs text-brand-text-secondary max-w-2xl mt-1 leading-relaxed">
+                      Either scan your connected Google Workspace live for clashes, or analyze a custom manual nightmare scenario below.
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto shrink-0 border-t border-brand-border/20 pt-4 w-full">
+                    <button
+                      onClick={executeLiveWorkspaceScan}
+                      disabled={isEvaluating}
+                      className={`px-5 py-3.5 rounded-lg text-xs font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                        isEvaluating 
+                          ? "bg-brand-surface/60 border-brand-border text-brand-text-secondary/60 cursor-not-allowed" 
+                          : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)] hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] active:scale-95"
+                      }`}
+                      title="Scan connected Workspace live for any scheduling or deadline clashes automatically"
+                    >
+                      {isScanningWorkspace ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                          Scanning...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4 text-emerald-400 fill-emerald-400 animate-pulse" />
+                          Scan Live Workspace
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={executeAIEngine}
+                      disabled={isEvaluating}
+                      className={`px-5 py-3.5 rounded-lg text-xs font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                        isEvaluating 
+                          ? "bg-brand-surface/60 text-brand-text-secondary/60 cursor-not-allowed" 
+                          : "bg-brand-primary hover:bg-brand-accent text-white shadow-lg shadow-brand-primary/20 active:scale-95"
+                      }`}
+                    >
+                      {isEvaluating && !isScanningWorkspace ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                          Evaluating...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4 text-white fill-white" />
+                          Analyze Scenario
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* AI Evaluation Output Stage */}
+                <div className="p-6 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-sm flex-1 min-h-[480px] flex flex-col justify-between">
+                  
+                  <div>
+                    {/* Header showing system status */}
+                    <div className="flex items-center justify-between pb-4 border-b border-brand-border/40 mb-6">
+                      <div className="flex items-center gap-2">
+                        <TerminalIcon className="w-5 h-5 text-brand-primary" />
+                        <span className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest font-mono">
+                          Active Canvas Output Staging
+                        </span>
+                      </div>
+                      
+                      {evalResult && (
+                        <div className="flex items-center gap-4 text-xs font-mono">
+                          {evalResult.isDemo && (
+                            <span className="px-2 py-0.5 rounded bg-brand-primary/10 border border-brand-primary/20 text-brand-primary font-semibold uppercase text-[9px] tracking-wider animate-pulse">
+                              DEMO MODE
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-brand-text-secondary font-medium">Risk Assessment:</span>
+                            <span className={`font-extrabold px-2 py-0.5 rounded ${
+                              evalResult.riskScore > 75 ? "bg-rose-500/15 text-rose-400 border border-rose-500/20" : "bg-brand-primary/15 text-brand-primary border border-brand-primary/20"
+                            }`}>
+                              {evalResult.riskScore}/100
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Output states */}
+                    {!evalResult && !isEvaluating && (
+                      <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+                        <div className="w-16 h-16 rounded-full bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-center mb-4 text-brand-primary animate-pulse">
+                          <Zap className="w-8 h-8 text-brand-primary fill-brand-primary" />
+                        </div>
+                        <h4 className="text-stone-900 font-bold mb-1.5 font-sans">No Active Intercepts Evaluated</h4>
+                        <p className="text-stone-600 text-xs max-w-sm leading-relaxed mb-6">
+                          Load a scenario preset on the left or customize it, then press &quot;Execute Intercept Guard&quot; to stage active Gemini-built defenses.
+                        </p>
+                        <div className="flex items-center gap-3 bg-stone-50 p-3 rounded-lg border border-stone-200 max-w-md text-left text-[11px] text-stone-600">
+                          <ShieldAlert className="w-4 h-4 text-brand-primary shrink-0" />
+                          <span>Aheado shields you by drafting email excuses, pre-digested reading syllabi, and auto-splitting bill payments instantly.</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Loading stage */}
+                    {isEvaluating && (
+                      <div className="flex flex-col items-center justify-center py-24 text-center">
+                        <div className="relative mb-6">
+                          <div className="w-16 h-16 rounded-full border border-brand-primary/30 border-t-brand-primary animate-spin" />
+                          <Sparkles className="w-6 h-6 text-brand-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+                        </div>
+                        <h4 className="text-stone-900 font-bold mb-1 font-sans">Aheado Intercept Core Thinking...</h4>
+                        <p className="text-brand-primary text-xs animate-pulse max-w-sm font-mono">
+                          Drafting emergency solutions, calendar rescheduling briefs, and invoice payment plans.
+                        </p>
+                        
+                        <div className="mt-8 w-full max-w-md bg-stone-50 rounded-lg p-3 text-left border border-stone-200">
+                          <div className="text-[10px] text-stone-500 font-mono flex items-center justify-between mb-1">
+                            <span>AGENT PROCESSOR LOG:</span>
+                            <span className="text-brand-primary animate-ping">●</span>
+                          </div>
+                          <div className="text-[11px] font-mono text-stone-600 line-clamp-1">
+                            {logs[0]}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Evaluation Successful Content */}
+                    {evalResult && !isEvaluating && (
+                      <div className="flex flex-col gap-6">
+                        
+                        {/* Core Synthesis */}
+                        <div className="p-4 rounded-lg bg-brand-primary/10 border border-brand-primary/20 text-brand-text-secondary text-xs leading-relaxed flex items-start gap-3">
+                          <Sparkles className="w-5 h-5 text-brand-primary shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-brand-primary block mb-1">Crisis Synthesis:</span>
+                            {evalResult.summary}
+                          </div>
+                        </div>
+
+                        {/* Staged Intercept Action Cards */}
+                        <div className="flex flex-col gap-5">
+                          {/* Calendar Rescheduling Group / Mutually Exclusive Strategies */}
+                          {(() => {
+                            const conflictOptions = evalResult.intercepts?.filter((i: any) => i.isConflictOption) || [];
+                            if (conflictOptions.length === 0) return null;
+
+                            const isAnyConflictApproved = conflictOptions.some((o: any) => approvedIntercepts.includes(o.id));
+                            
+                            return (
+                              <div className="p-5 rounded-xl border border-rose-200 bg-rose-50/10 shadow-md">
+                                <div className="flex items-center gap-2 mb-3.5 border-b border-rose-100 pb-2.5">
+                                  <div className="p-2 rounded-lg bg-rose-500/10 text-rose-600 animate-pulse">
+                                    <AlertTriangle className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-black text-rose-950 uppercase tracking-wider font-mono">
+                                      CRITICAL COLLISION INTERCEPT PANEL
+                                    </h4>
+                                    <p className="text-[10px] text-stone-500 font-mono">
+                                      Aheado detected a double-booking. Select your resolution strategy below:
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col gap-4">
+                                  {conflictOptions.map((opt: any) => {
+                                    const isApproved = approvedIntercepts.includes(opt.id);
+                                    const isOtherApproved = isAnyConflictApproved && !isApproved;
+                                    
+                                    return (
+                                      <div 
+                                        key={opt.id}
+                                        className={`p-4 rounded-xl border transition-all flex flex-col justify-between ${
+                                          isApproved 
+                                            ? "bg-emerald-50/80 border-emerald-400 shadow-md ring-2 ring-emerald-500/20" 
+                                            : isOtherApproved
+                                              ? "bg-stone-50/40 border-stone-150 opacity-50 cursor-not-allowed scale-[0.98]"
+                                              : "bg-white border-stone-200 hover:border-brand-primary/40 shadow-sm hover:shadow-md"
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between gap-2 mb-2">
+                                            <span className={`text-[10px] font-extrabold uppercase tracking-widest font-mono px-2 py-0.5 rounded-full ${
+                                              opt.resolutionTarget === "A" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"
+                                            }`}>
+                                              STRATEGY {opt.resolutionTarget}
+                                            </span>
+                                            <div className="flex items-center gap-1 font-mono text-[10px]">
+                                              <span className="text-stone-400 font-semibold">Importance:</span>
+                                              <span className={`font-bold px-1.5 py-0.5 rounded ${
+                                                opt.eventImportance >= 90 ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"
+                                              }`}>{opt.eventImportance}/100</span>
+                                            </div>
+                                          </div>
+
+                                          <h5 className="text-xs font-extrabold text-stone-900 mb-1.5 uppercase leading-snug">
+                                            {opt.title}
+                                          </h5>
+                                          <p className="text-[11px] text-stone-600 leading-relaxed mb-3">
+                                            {opt.description}
+                                          </p>
+
+                                          <div className="p-2.5 rounded bg-stone-950 border border-stone-850 mb-3 font-mono">
+                                            <div className="flex items-center justify-between text-[9px] font-bold text-stone-500 uppercase tracking-widest mb-1 select-none">
+                                              <span>PROPOSED SHIFT DRAFT</span>
+                                              <button 
+                                                onClick={() => copyToClipboard(opt.outputDraft, opt.id)}
+                                                className="text-stone-450 hover:text-brand-primary flex items-center gap-1 transition-colors cursor-pointer"
+                                              >
+                                                {copiedId === opt.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                                <span>COPY</span>
+                                              </button>
+                                            </div>
+                                            <pre className="text-[10px] text-stone-200 whitespace-pre-wrap break-all leading-normal max-h-[140px] overflow-y-auto">
+                                              {opt.outputDraft}
+                                            </pre>
+                                          </div>
+                                        </div>
+
+                                        <div className="pt-2 border-t border-stone-100 mt-2 flex items-center justify-between">
+                                          <div className="text-[9px] text-stone-400 font-mono">
+                                            Action: {opt.actionTaken}
+                                          </div>
+
+                                          <button
+                                            onClick={() => !isOtherApproved && approveAction(opt.id)}
+                                            disabled={isOtherApproved || isApproved}
+                                            className={`px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 transition-all ${
+                                              isApproved 
+                                                ? "bg-emerald-500 text-white shadow-sm" 
+                                                : isOtherApproved
+                                                  ? "bg-stone-100 text-stone-300 border border-stone-200 cursor-not-allowed"
+                                                  : "bg-brand-primary hover:bg-brand-accent text-white shadow-sm cursor-pointer"
+                                            }`}
+                                          >
+                                            {isApproved ? (
+                                              <>
+                                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                                <span>Deployed Shield</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Zap className="w-3.5 h-3.5" />
+                                                <span>Deploy Strategy</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Standard / Non-clashing Intercept Guards */}
+                          {(() => {
+                            const regularIntercepts = evalResult.intercepts?.filter((i: any) => !i.isConflictOption) || [];
+                            if (regularIntercepts.length === 0) return null;
+                            
+                            return (
+                              <div className="flex flex-col gap-4">
+                                <h4 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest flex items-center gap-1.5 font-mono">
+                                  <Activity className="w-4 h-4 text-brand-primary" />
+                                  Active System Shields ({regularIntercepts.length})
+                                </h4>
+
+                                <div className="grid grid-cols-1 gap-4">
+                                  {regularIntercepts.map((intercept: any, idx: number) => {
+                                    const isApproved = approvedIntercepts.includes(intercept.id);
+                                    return (
+                                      <div 
+                                        key={intercept.id || idx}
+                                        className={`p-5 rounded-lg border transition-all ${
+                                          isApproved 
+                                            ? "bg-emerald-50/75 border-emerald-300 shadow-sm" 
+                                            : "bg-stone-50 border-stone-200 hover:border-brand-primary/30 shadow-sm"
+                                        }`}
+                                      >
+                                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
+                                          <div className="flex items-center gap-2.5">
+                                            <div className={`p-1.5 rounded-lg shrink-0 ${
+                                              intercept.category === "assignment" ? "bg-emerald-500/10 text-emerald-600" :
+                                              intercept.category === "bill" ? "bg-amber-500/10 text-amber-600" :
+                                              "bg-brand-primary/10 text-brand-primary"
+                                            }`}>
+                                              {intercept.category === "assignment" && <FileText className="w-4 h-4" />}
+                                              {intercept.category === "bill" && <CreditCard className="w-4 h-4" />}
+                                              {intercept.category === "calendar" && <Calendar className="w-4 h-4" />}
+                                            </div>
+                                            <div>
+                                              <div className={`text-xs font-extrabold uppercase tracking-wide ${isApproved ? "text-emerald-950" : "text-stone-900"}`}>
+                                                {intercept.title}
+                                              </div>
+                                              <div className="text-[10px] text-stone-500 font-mono">
+                                                Category: <span className={`uppercase font-semibold ${isApproved ? "text-emerald-850" : "text-stone-850"}`}>{intercept.category}</span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2 font-mono">
+                                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider ${
+                                              intercept.urgency === "CRITICAL" ? "bg-rose-500/15 text-rose-600 border border-rose-500/20" :
+                                              intercept.urgency === "HIGH" ? "bg-amber-500/15 text-amber-600 border border-amber-500/20" :
+                                              "bg-brand-primary/15 text-brand-primary border border-brand-primary/20"
+                                            }`}>
+                                              {intercept.urgency}
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        <p className="text-xs text-stone-600 leading-relaxed mb-3">
+                                          {intercept.description}
+                                        </p>
+
+                                        <div className="p-3.5 rounded-lg bg-stone-900 border border-stone-800 mb-4">
+                                          <div className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5 flex items-center justify-between font-mono">
+                                            <span>Action Script output</span>
+                                            <button 
+                                              onClick={() => copyToClipboard(intercept.outputDraft, intercept.id)}
+                                              className="text-stone-450 hover:text-brand-primary flex items-center gap-1 transition-colors cursor-pointer"
+                                            >
+                                              {copiedId === intercept.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 animate-pulse" />}
+                                              <span>Copy Code</span>
+                                            </button>
+                                          </div>
+                                          <pre className="text-[11px] font-mono text-stone-200 whitespace-pre-wrap break-all leading-relaxed bg-transparent p-1 select-all">
+                                            {intercept.outputDraft}
+                                          </pre>
+                                        </div>
+
+                                        <div className="flex items-center justify-between text-xs pt-1">
+                                          <div className="text-stone-500 flex items-center gap-1.5 font-mono text-[11px]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
+                                            <span>Auto Action: <strong className={isApproved ? "text-emerald-800 font-semibold" : "text-stone-800 font-semibold"}>{intercept.actionTaken}</strong></span>
+                                          </div>
+
+                                          <button
+                                            onClick={() => approveAction(intercept.id)}
+                                            disabled={isApproved}
+                                            className={`px-4 py-1.5 rounded-lg font-bold text-[11px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer ${
+                                              isApproved 
+                                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
+                                                : "bg-brand-primary hover:bg-brand-accent text-white shadow-sm"
+                                            }`}
+                                          >
+                                            {isApproved ? (
+                                              <>
+                                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                                Deployed Shield
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Zap className="w-3.5 h-3.5 text-white fill-white" />
+                                                Approve Auto-Action
+                                              </>
+                                            )}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          </div>
+                        </div>
+
+                      )}
+
+                  </div>
+
+                  {/* Reassurance Footer */}
+                  {evalResult && (
+                    <div className="mt-8 pt-4 border-t border-gray-900 flex items-center justify-between text-[11px] text-gray-500 font-mono">
+                      <span>Proactive Defense Status: ACTIVE SHIELD</span>
+                      <span className="text-blue-400 font-semibold italic">{evalResult.reassurance}</span>
+                    </div>
+                  )}
+
+                </div>
+
+              </div>
+              </div>
+
+            </motion.div>
+          ) : (
+            
+            // SKILLS ENGINE PLAYGROUND TAB (Capabilities)
+            <motion.div
+              key="skills-tab"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+              className="grid grid-cols-1 md:grid-cols-12 gap-8"
+            >
+              {/* Left Selector: 4 columns */}
+              <div className="md:col-span-4 flex flex-col gap-3">
+                <h3 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest px-1 mb-2 font-mono">
+                  Aheado Agent Capabilities
+                </h3>
+
+                {[
+                  {
+                    id: "scraper",
+                    title: "Deadlines Portal Scraper",
+                    desc: "Automated scraping of Canvas/Blackboard deadlines",
+                    badge: "STATIONARY"
+                  },
+                  {
+                    id: "writer",
+                    title: "Emergency Solution Digest",
+                    desc: "Saves blanks by framing assignment outline drafts",
+                    badge: "AI-DRIVEN"
+                  },
+                  {
+                    id: "bills",
+                    title: "Late Fee Bill Interceptor",
+                    desc: "Saves credit score by deferring bill receipts",
+                    badge: "CASH FLOW"
+                  },
+                  {
+                    id: "calendar",
+                    title: "Polite Conflict Decoupler",
+                    desc: "Self-negotiates reschedule alternatives",
+                    badge: "E-MAIL BOT"
+                  }
+                ].map((sk) => (
+                  <button
+                    key={sk.id}
+                    onClick={() => { setSelectedSkill(sk.id); triggerToast(`Selected ${sk.title} skill configuration.`); }}
+                    className={`p-4 rounded-lg text-left border transition-all cursor-pointer ${
+                      selectedSkill === sk.id 
+                        ? "bg-brand-primary/[0.06] border-brand-primary shadow-sm" 
+                        : "bg-stone-50/70 border-stone-200 hover:border-brand-primary/30 hover:bg-stone-100/70"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`text-xs font-extrabold uppercase tracking-wider ${selectedSkill === sk.id ? "text-brand-primary animate-pulse" : "text-stone-800"}`}>{sk.title}</span>
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                        selectedSkill === sk.id ? "bg-brand-primary/15 text-brand-primary" : "bg-stone-200 text-stone-600"
+                      }`}>
+                        {sk.badge}
+                      </span>
+                    </div>
+                    <p className={`text-[11px] leading-relaxed ${selectedSkill === sk.id ? "text-brand-accent/90 animate-pulse" : "text-stone-500"}`}>
+                      {sk.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
+
+              {/* Right Workspace detail: 8 columns */}
+              <div className="md:col-span-8 p-6 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-sm min-h-[480px] flex flex-col justify-between">
+                
+                <div>
+                  <div className="flex items-center gap-2 pb-4 border-b border-brand-border/60 mb-6">
+                    <FileCode className="w-5 h-5 text-brand-primary" />
+                    <span className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest font-mono">
+                      Skill Diagnostic Sandbox
+                    </span>
+                  </div>
+
+                  {selectedSkill === "scraper" && (
+                    <div>
+                      <h3 className="text-base font-bold text-stone-900 mb-2 font-sans">Deadlines Portal Scraper</h3>
+                      <p className="text-stone-600 text-xs leading-relaxed mb-6 font-serif">
+                        Pulls data directly from university portals, automated receipts, or local calendar schedules. When it detects an assignment due date matching a high-stress index, it immediately triggers the outlining bot to pre-draft.
+                      </p>
+
+                      <div className="p-4 rounded-lg bg-stone-900 border border-stone-800 text-xs font-mono text-stone-400 mb-6 shadow-inner">
+                        <div className="text-stone-500 mb-2">// Run diagnostic code</div>
+                        <div>const portal = await Aheado.connectPortal(&apos;canvas&apos;);</div>
+                        <div>const assignments = await portal.getUpcomingTasks(24);</div>
+                        <div className="text-brand-primary mt-2">// Response payload output</div>
+                        <div className="text-stone-100">
+                          &gt; Found &quot;CS229 Homework 3&quot; due in 4h 12m.<br />
+                          &gt; Threat Level: <span className="text-rose-400 font-bold">CRITICAL</span>. Launching emergency draft staging...
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSkill === "writer" && (
+                    <div>
+                      <h3 className="text-base font-bold text-stone-900 mb-2 font-sans">Emergency Solution Digest</h3>
+                      <p className="text-stone-600 text-xs leading-relaxed mb-6 font-serif">
+                        Uses Gemini-3.5-Flash to digest raw assignments or instruction briefs and structures a detailed academic thesis blueprint or solution skeleton, saving hours of initial starting-block writers block.
+                      </p>
+
+                      <div className="p-4 rounded-lg bg-stone-900 border border-stone-800 text-xs font-mono text-stone-400 mb-6 shadow-inner">
+                        <div className="text-stone-500 mb-2">// Call writer agent sandbox</div>
+                        <div>const digest = await Aheado.Agent.digest(&apos;Organic Chemistry Lab Brief&apos;);</div>
+                        <div className="text-brand-primary mt-2">// Output pre-draft structure</div>
+                        <div className="text-stone-100">
+                          &gt; Draft Title: Synthesis of Ethyl Acetate Heuristics<br />
+                          &gt; Sections Staged: Introduction, Yield Calculation, Error Factor analysis.<br />
+                          &gt; Submited pre-draft stage successfully.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSkill === "bills" && (
+                    <div>
+                      <h3 className="text-base font-bold text-stone-900 mb-2 font-sans">Late Fee Bill Interceptor</h3>
+                      <p className="text-stone-600 text-xs leading-relaxed mb-6 font-serif">
+                        Extracts due dates from incoming bill PDF streams and compares them to your active cash flow buffers. Stagers payment deferral options or auto-proposes low-balance payments to guard credit rating before overdraft.
+                      </p>
+
+                      <div className="p-4 rounded-lg bg-stone-900 border border-stone-800 text-xs font-mono text-stone-400 mb-6 shadow-inner">
+                        <div className="text-stone-500 mb-2">// Active bill monitoring diagnostics</div>
+                        <div>const invoice = await Aheado.BillScanner.scanInvoice(emailReceipt);</div>
+                        <div>const action = await invoice.evaluateDeferredPlan();</div>
+                        <div className="text-brand-primary mt-2">// Action output</div>
+                        <div className="text-stone-100">
+                          &gt; Bill Found: PGE Utility ($120.00) due Tomorrow.<br />
+                          &gt; Cash Flow Safety limit exceeded. Automated split of 50% requested.<br />
+                          &gt; Safeguard active.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSkill === "calendar" && (
+                    <div>
+                      <h3 className="text-base font-bold text-stone-900 mb-2 font-sans">Polite Conflict Decoupler</h3>
+                      <p className="text-stone-600 text-xs leading-relaxed mb-6 font-serif">
+                        Analyzes your Google or Outlook Calendar schedules. When a double-booking or meeting overlap is caught, it auto-drafts polite rescheduling template alternatives and opens a review prompt to defer the meeting.
+                      </p>
+
+                      <div className="p-4 rounded-lg bg-stone-900 border border-stone-800 text-xs font-mono text-stone-400 mb-6 shadow-inner">
+                        <div className="text-stone-500 mb-2">// Run decoupler sensor</div>
+                        <div>const overlap = await Aheado.CalendarGuard.detectOverlap(tomorrow_9AM);</div>
+                        <div>const politeMail = await overlap.createRescheduleDraft();</div>
+                        <div className="text-brand-primary mt-2">// Staged message output</div>
+                        <div className="text-stone-100">
+                          &gt; Double Booking detected: Advisor sync &amp; Presentation.<br />
+                          &gt; Output: Reschedule request draft staged inside Canvas queue.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-brand-border/40 flex items-center justify-between font-mono">
+                  <div className="text-brand-text-secondary text-xs">
+                    State: Tested successfully.
+                  </div>
+                  <button 
+                    onClick={() => { triggerToast("Aheado skills test successful. Code is compiled."); }}
+                    className="px-4 py-2 rounded-lg bg-brand-primary hover:bg-brand-accent text-white font-bold text-xs cursor-pointer transition-colors"
+                  >
+                    Run Skill Diagnostic
+                  </button>
+                </div>
+
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* BOTTOM REAL-TIME CONSOLE LOGGER (High-Tech Terminal Output) */}
+        <div className="mt-12 p-5 rounded-lg border border-stone-800 bg-stone-900 text-xs font-mono text-stone-300 relative overflow-hidden shadow-inner">
+          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-brand-primary/10 via-brand-primary/50 to-brand-primary/10" />
+          <div className="flex items-center justify-between mb-3 text-[10px] uppercase tracking-widest text-stone-400 font-bold">
+            <div className="flex items-center gap-2">
+              <TerminalIcon className="w-4 h-4 text-brand-primary animate-pulse" />
+              <span>Real-Time Proactive Log Monitor</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span>Status: <strong className="text-brand-primary animate-pulse font-normal">Listening</strong></span>
+              <button 
+                onClick={() => setLogs(["Console log history cleared.", "Standing by..."])}
+                className="text-stone-300 hover:text-brand-primary transition-colors cursor-pointer uppercase font-bold text-[9px]"
+              >
+                Clear History
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto pr-2 custom-scrollbar">
+            {logs.map((log, index) => (
+              <div key={index} className="flex items-start gap-2.5 leading-relaxed">
+                <span className="text-brand-primary/85 shrink-0 select-none font-medium">[{new Date().toLocaleTimeString()}]</span>
+                <span className={log.startsWith("❌") ? "text-rose-400" : log.startsWith("✅") ? "text-emerald-400 font-semibold" : "text-stone-100"}>
+                  {log}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </section>
+        </>
+      )}
+
+      {viewMode === 'landing' && (
+        <>
+          {/* ARCHITECTURAL FEATURES BENTO GRID */}
+          <section id="architecture" className="max-w-7xl mx-auto px-4 md:px-8 py-16 relative z-10 w-full border-t border-brand-border/30">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-brand-primary/20 bg-brand-primary/10 text-[10px] font-bold tracking-widest text-brand-primary uppercase mb-4">
+            <Layers className="w-3.5 h-3.5 text-brand-primary" />
+            Core Architecture
+          </div>
+          <h2 className="text-3xl md:text-4xl font-sans font-medium tracking-tight text-stone-900 uppercase mb-4">
+            Architectural Features Bento Grid
+          </h2>
+          <p className="text-sm text-brand-text-secondary leading-relaxed font-serif">
+            Our background agents run continuous deep-scans on your linked workspaces to isolate, mitigate, and resolve critical bottlenecks before they disrupt your life.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          {/* Bento Card 1 */}
+          <div className="p-8 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-md relative overflow-hidden group hover:border-brand-primary transition-all flex flex-col justify-between h-80">
+            <div className="absolute top-0 right-0 p-6 text-brand-primary/10 group-hover:text-brand-primary/20 transition-colors">
+              <Activity className="w-20 h-20 stroke-[1]" />
+            </div>
+            <div>
+              <div className="text-xs font-bold font-mono text-brand-primary uppercase tracking-widest mb-3">
+                01 / Autonomous Portal Interception
+              </div>
+              <h3 className="text-lg font-bold text-stone-900 mb-3 uppercase">
+                Continuous Workspace Scans
+              </h3>
+              <p className="text-xs text-gray-600 leading-relaxed font-sans">
+                Background synchronization with Canvas, Blackboard, Jira dashboards, and automated utility bill streams. Dynamically catches incoming milestone penalties.
+              </p>
+            </div>
+            <div className="text-[10px] text-brand-text-secondary font-mono mt-4 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
+              <span>Real-time monitoring active</span>
+            </div>
+          </div>
+
+          {/* Bento Card 2 */}
+          <div className="p-8 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-md relative overflow-hidden group hover:border-brand-primary transition-all flex flex-col justify-between h-80">
+            <div className="absolute top-0 right-0 p-6 text-brand-primary/10 group-hover:text-brand-primary/20 transition-colors">
+              <Sparkles className="w-20 h-20 stroke-[1]" />
+            </div>
+            <div>
+              <div className="text-xs font-bold font-mono text-brand-primary uppercase tracking-widest mb-3">
+                02 / Agentic Task Pre-Execution
+              </div>
+              <h3 className="text-lg font-bold text-stone-900 mb-3 uppercase">
+                Generative Draft Blueprints
+              </h3>
+              <p className="text-xs text-gray-600 leading-relaxed font-sans">
+                Stages fully tailored assignment outline summaries, conceptual cheat sheets, and polite, formal rescheduling email templates automatically via Gemini.
+              </p>
+            </div>
+            <div className="text-[10px] text-brand-text-secondary font-mono mt-4 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
+              <span>Staged in local sandbox drafts</span>
+            </div>
+          </div>
+
+          {/* Bento Card 3 */}
+          <div className="p-8 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-md relative overflow-hidden group hover:border-brand-primary transition-all flex flex-col justify-between h-80">
+            <div className="absolute top-0 right-0 p-6 text-brand-primary/10 group-hover:text-brand-primary/20 transition-colors">
+              <Clock className="w-20 h-20 stroke-[1]" />
+            </div>
+            <div>
+              <div className="text-xs font-bold font-mono text-brand-primary uppercase tracking-widest mb-3">
+                03 / Red-Zone Failsafe Override
+              </div>
+              <h3 className="text-lg font-bold text-stone-900 mb-3 uppercase">
+                Last-Minute Threat Guard
+              </h3>
+              <p className="text-xs text-gray-600 leading-relaxed font-sans">
+                Rearranges colliding calendar items, pre-approves partial installment energy payments, and dispatches high-priority SMS alerts to shield you inside the 24h red-zone.
+              </p>
+            </div>
+            <div className="text-[10px] text-brand-text-secondary font-mono mt-4 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
+              <span>Automatic trigger within 24h</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* AUTOMATION PRICING HORIZON */}
+      <section id="pricing" className="max-w-7xl mx-auto px-4 md:px-8 py-20 relative z-10 w-full border-t border-brand-border/30">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-brand-primary/20 bg-brand-primary/10 text-[10px] font-bold tracking-widest text-brand-primary uppercase mb-4 font-mono">
+            <CreditCard className="w-3.5 h-3.5 text-brand-primary" />
+            Pricing Horizon
+          </div>
+          <h2 className="text-3xl md:text-4xl font-sans font-medium tracking-tight text-stone-900 uppercase mb-4">
+            Automation Pricing Horizon
+          </h2>
+          <p className="text-sm text-brand-text-secondary leading-relaxed font-serif">
+            Select the appropriate safeguard tier. Defer late stress forever.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch pt-6">
+          
+          {/* Plan 1 */}
+          <motion.div 
+            whileHover={{ y: -8, scale: selectedPlan === 0 ? 1.02 : 1.01, boxShadow: "0 20px 40px rgba(0, 0, 0, 0.08)" }}
+            whileTap={{ scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 400, damping: 22 }}
+            onClick={() => {
+              setSelectedPlan(0);
+              triggerToast("🌱 Student Pilot Plan selected! Active in test sandbox.");
+              setLogs(prev => ["💳 User selected [Student Pilot] Safeguard Horizon - Free tier.", ...prev]);
+            }}
+            className={`p-8 rounded-2xl border backdrop-blur-sm relative flex flex-col justify-between transition-all duration-300 cursor-pointer select-none ${
+              selectedPlan === 0 
+                ? "border-brand-primary ring-4 ring-brand-primary/20 bg-amber-50/20 shadow-[0_15px_35px_rgba(249,115,22,0.12)]" 
+                : "border-brand-border bg-brand-surface hover:border-brand-primary/30"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-bold uppercase tracking-widest text-brand-text-secondary font-mono">Student Pilot</div>
+                {selectedPlan === 0 && (
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="text-[9px] bg-brand-primary text-white font-extrabold px-2 py-0.5 rounded font-mono uppercase tracking-wider"
+                  >
+                    Active Tier
+                  </motion.span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-1 mb-6">
+                <span className="text-3xl font-extrabold text-stone-900">$0</span>
+                <span className="text-xs text-brand-text-secondary font-mono">/ Forever Free</span>
+              </div>
+              <p className="text-xs text-brand-text-secondary mb-6 font-serif">
+                Perfect for standard assignment timelines and lightweight calendar organization.
+              </p>
+              <div className="border-t border-brand-border/40 pt-6 flex flex-col gap-3">
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>2 active portal sync paths</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Basic markdown template outputs</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Standard cloud scanner refresh times</span>
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedPlan(0);
+                triggerToast("Student Pilot activated. Welcome aboard!");
+              }}
+              className="mt-8 w-full py-3 rounded-lg bg-black border border-brand-border hover:bg-brand-surface hover:border-brand-primary text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer font-mono"
+            >
+              Get Started Free
+            </button>
+          </motion.div>
+
+          {/* Plan 2: Pro Companion (Elevated with brand-primary border and soft warm shadow) */}
+          <motion.div 
+            whileHover={{ y: selectedPlan === 1 ? -12 : -8, scale: selectedPlan === 1 ? 1.05 : 1.04, boxShadow: "0 25px 50px rgba(217,90,20,0.22)" }}
+            whileTap={{ scale: 0.97 }}
+            transition={{ type: "spring", stiffness: 400, damping: 22 }}
+            onClick={() => {
+              setSelectedPlan(1);
+              triggerToast("⚡ Pro Companion selected! Upgraded inside workspace.");
+              setLogs(prev => ["💳 User selected [Pro Companion] Safeguard Horizon - $19/mo.", ...prev]);
+            }}
+            className={`p-8 rounded-2xl border-2 relative flex flex-col justify-between transition-all duration-300 cursor-pointer select-none z-20 ${
+              selectedPlan === 1 
+                ? "border-brand-primary ring-4 ring-brand-primary/30 bg-orange-50/30 shadow-[0_24px_60px_rgba(217,90,20,0.28)] md:-translate-y-5" 
+                : "border-brand-primary bg-white shadow-[0_24px_50px_rgba(217,90,20,0.14)] md:-translate-y-4 md:scale-[1.03]"
+            }`}
+          >
+            <div className="absolute top-4 right-4 bg-brand-primary text-white font-bold uppercase tracking-widest text-[9px] px-2.5 py-1 rounded font-mono shadow-[0_4px_12px_rgba(217,90,20,0.3)]">
+              {selectedPlan === 1 ? "Selected Companion" : "Best Value"}
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-widest text-brand-primary mb-2 font-mono">Pro Companion</div>
+              <div className="flex items-baseline gap-1 mb-6">
+                <span className="text-3xl font-extrabold text-stone-900">$19</span>
+                <span className="text-xs text-brand-text-secondary font-mono">/ month</span>
+              </div>
+              <p className="text-xs text-gray-600 mb-6 font-serif">
+                Full-stack proactive mitigation guard with voice override alerts and unlimited agent portals.
+              </p>
+              <div className="border-t border-brand-border/40 pt-6 flex flex-col gap-3">
+                <div className="flex items-center gap-2.5 text-xs text-gray-700 font-medium">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Unlimited app & portal integrations</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-gray-700 font-medium">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Real-time adaptive context generation</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-gray-700 font-medium">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Automated SMS/Call phone overrides</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-gray-700 font-medium">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Priority 1-minute server polling</span>
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedPlan(1);
+                triggerToast("⚡ Thank you! Pro Companion upgraded successfully in test mode.");
+              }}
+              className="mt-8 w-full py-3 rounded-lg bg-brand-primary hover:bg-brand-accent text-white font-bold text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(249,115,22,0.3)] transition-all cursor-pointer font-mono"
+            >
+              Upgrade to Pro
+            </button>
+          </motion.div>
+
+          {/* Plan 3 */}
+          <motion.div 
+            whileHover={{ y: -8, scale: selectedPlan === 2 ? 1.02 : 1.01, boxShadow: "0 20px 40px rgba(0, 0, 0, 0.08)" }}
+            whileTap={{ scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 400, damping: 22 }}
+            onClick={() => {
+              setSelectedPlan(2);
+              triggerToast("💼 Enterprise Sync selected! Custom contact channel open.");
+              setLogs(prev => ["💳 User selected [Enterprise Sync] Safeguard Horizon - Custom Tier.", ...prev]);
+            }}
+            className={`p-8 rounded-2xl border backdrop-blur-sm relative flex flex-col justify-between transition-all duration-300 cursor-pointer select-none ${
+              selectedPlan === 2 
+                ? "border-brand-primary ring-4 ring-brand-primary/20 bg-amber-50/20 shadow-[0_15px_35px_rgba(249,115,22,0.12)]" 
+                : "border-brand-border bg-brand-surface hover:border-brand-primary/30"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-bold uppercase tracking-widest text-brand-text-secondary font-mono">Enterprise Sync</div>
+                {selectedPlan === 2 && (
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="text-[9px] bg-brand-primary text-white font-extrabold px-2 py-0.5 rounded font-mono uppercase tracking-wider"
+                  >
+                    Active Tier
+                  </motion.span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-1 mb-6">
+                <span className="text-3xl font-extrabold text-stone-900">Custom</span>
+                <span className="text-xs text-brand-text-secondary font-mono">/ Annually</span>
+              </div>
+              <p className="text-xs text-brand-text-secondary mb-6 font-serif">
+                Designed for high-growth start-up teams, university cohorts, and custom developer groups.
+              </p>
+              <div className="border-t border-brand-border/40 pt-6 flex flex-col gap-3">
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary font-mono">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Collaborative team environments</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Priority pipeline server execution speeds</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Custom Slack/Teams intercept gateways</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-xs text-brand-text-secondary">
+                  <Check className="w-4 h-4 text-brand-primary shrink-0" />
+                  <span>Dedicated compliance officer SLA</span>
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedPlan(2);
+                triggerToast("Contact form simulation activated. We will email you!");
+              }}
+              className="mt-8 w-full py-3 rounded-lg bg-black border border-brand-border hover:bg-brand-surface hover:border-brand-primary text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer font-mono"
+            >
+              Contact Solutions
+            </button>
+          </motion.div>
+
+        </div>
+      </section>
+        </>
+      )}
+
+      {/* LOGIN / SIGN UP PAGE */}
+      {viewMode === 'login' && (
+        <div className="min-h-[85vh] flex flex-col justify-center items-center pt-32 pb-12 px-4 relative z-10">
+          {/* Background Glow */}
+          <div className="absolute inset-0 glow-radial pointer-events-none z-0" />
+          
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-md p-8 rounded-2xl border border-brand-border bg-brand-surface backdrop-blur-md shadow-[0_24px_64px_rgba(92,88,82,0.06)] relative z-10 text-center"
+          >
+            <div className="w-12 h-12 rounded-full bg-brand-primary flex items-center justify-center mx-auto mb-6 shadow-[0_0_20px_rgba(249,115,22,0.4)]">
+              <Lock className="w-5 h-5 text-white" />
+            </div>
+            
+            <h2 className="text-xl font-extrabold tracking-tight text-stone-900 uppercase mb-2 font-sans">
+              Authorize Proactive Guard
+            </h2>
+            <p className="text-xs text-brand-text-secondary leading-relaxed mb-6 font-serif">
+              Link your Google Account to authorize background listeners. When activated, Aheado dispatches polite extension requests via Gmail and reschedules calendar clashes automatically.
+            </p>
+
+            {/* Main Google Button */}
+            <button
+              onClick={handleHeaderSignIn}
+              disabled={isHeaderVerifying}
+              className="w-full py-3 px-4 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 active:scale-[0.98] transition-all font-bold text-xs text-stone-700 shadow-sm flex items-center justify-center gap-3 cursor-pointer"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                />
+              </svg>
+              {isHeaderVerifying ? "Connecting with Google..." : "Sign In / Sign Up with Google"}
+            </button>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-brand-border/40"></div>
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase font-mono tracking-widest">
+                <span className="bg-brand-bg px-3 text-stone-500 font-extrabold">Reviewer Safeguard</span>
+              </div>
+            </div>
+
+            {/* Developer Bypass Warning */}
+            <div className="p-4 rounded-xl border border-amber-200/50 bg-amber-50/40 text-left mb-6">
+              <div className="flex gap-2 items-start text-amber-800 font-bold text-[9px] uppercase tracking-wider font-mono mb-1">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <span>Google Verification Shield</span>
+              </div>
+              <p className="text-[10px] text-amber-900 leading-relaxed font-sans mb-3">
+                Since Aheado is currently in sandboxed test mode, Google may block access for non-whitelisted testers. Please use the Direct bypass below to try out live Workspace features instantly!
+              </p>
+              <button
+                onClick={handleBypassSignIn}
+                className="w-full py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] uppercase tracking-wider font-mono shadow-sm cursor-pointer active:scale-95 transition-all text-center"
+              >
+                ⚡ 1-Click Mentor / Judge Bypass
+              </button>
+            </div>
+
+            {/* Direct Token Option */}
+            <div className="text-left">
+              <button
+                type="button"
+                onClick={() => setShowTokenInput(!showTokenInput)}
+                className="text-[9px] font-bold text-stone-500 hover:text-brand-primary uppercase tracking-widest font-mono flex items-center justify-center gap-1 mx-auto cursor-pointer"
+              >
+                <span>{showTokenInput ? "▼ Hide" : "▶ Show"} Direct Developer Token Login</span>
+              </button>
+
+              {showTokenInput && (
+                <form onSubmit={handleManualTokenSubmit} className="mt-4 flex flex-col gap-2">
+                  <input
+                    type="text"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder="Paste OAuth access token here..."
+                    className="w-full px-3 py-2 rounded-lg border border-stone-300 text-xs font-mono bg-stone-50 text-stone-800 focus:outline-none focus:border-brand-primary"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isHeaderVerifying}
+                    className="w-full py-2 px-3 rounded-lg bg-black hover:bg-stone-900 text-white font-bold text-[10px] uppercase tracking-wider font-mono cursor-pointer transition-all text-center"
+                  >
+                    Authenticate Token
+                  </button>
+                </form>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* FOOTER SECTION */}
+      <footer className="w-full bg-stone-50 border-t border-stone-200 py-12 relative z-10 text-center text-xs text-stone-500">
+
+        <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-brand-primary/10 flex items-center justify-center border border-brand-primary/20">
+              <Zap className="w-3.5 h-3.5 text-brand-primary" />
+            </div>
+            <span className="text-stone-900 font-extrabold tracking-wider font-sans">AHEADO</span>
+          </div>
+          <div className="text-stone-500">
+            &copy; {new Date().getFullYear()} Aheado Systems Inc. Proactive Last-Minute Life Saver. All rights protected.
+          </div>
+          <div className="flex items-center gap-4 text-stone-500">
+            <a href="#terms" onClick={(e) => { e.preventDefault(); triggerToast("Terms of service are standard sandbox developer agreements."); }} className="hover:text-brand-primary text-stone-600 transition-colors">Terms of Use</a>
+            <span>•</span>
+            <a href="#privacy" onClick={(e) => { e.preventDefault(); triggerToast("Privacy: No real portal data is saved in our server memory."); }} className="hover:text-brand-primary text-stone-600 transition-colors">Privacy Policy</a>
+          </div>
+        </div>
+      </footer>
+
+      <AnimatePresence>
+        {isExecutionModalOpen && selectedInterceptForExecution && (
+          <AgentExecutionModal
+            isOpen={isExecutionModalOpen}
+            onClose={() => {
+              setIsExecutionModalOpen(false);
+              setSelectedInterceptForExecution(null);
+            }}
+            intercept={selectedInterceptForExecution}
+            onSuccess={handleExecutionSuccess}
+            addSystemLog={(logText) => {
+              setLogs(prev => [logText, ...prev]);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}

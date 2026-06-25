@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-primary: #D95A14;
+  --color-brand-accent: #B24308;
+  --color-brand-bg: #FAF6F0;
+  --color-brand-surface: #FFFFFF;
+  --color-brand-border: #E8E2D5;
+  --color-brand-text-secondary: #6B655C;
+}
+
+/* Light cream theme overrides for pristine legibility */
+body {
+  background-color: var(--color-brand-bg);
+  color: #1C1A17;
+}
+
+/* Map standard text-white to dark charcoal inside cream/white panels for premium contrast */
+.text-white:not(button):not(button *):not(.bg-black):not(.bg-black *):not(.bg-brand-primary *):not(.bg-brand-accent *):not(.bg-emerald-500 *):not(.bg-rose-500 *):not(.bg-amber-500 *):not([class*="bg-emerald"] *):not([class*="bg-rose"] *):not([class*="bg-amber"] *) {
+  color: #1C1A17 !important;
+}
+
+/* Ensure headings have supreme high-contrast legibility */
+h1, h2, h3, h4, h5, h6 {
+  color: #1C1A17 !important;
+}
+
+/* Ensure the hero dynamic color gradients continue to clip properly and stay visible */
+h1 span.bg-clip-text {
+  color: transparent !important;
+}
+
+/* Legible text colors for secondary captions */
+.text-brand-text-secondary {
+  color: #5C5852 !important;
+}
+
+/* Soft warm glow effect instead of dark orange */
+.glow-radial {
+  background: radial-gradient(circle, rgba(217, 90, 20, 0.08) 0%, rgba(250, 246, 240, 0) 70%) !important;
+}
+
+/* Elegant, responsive inputs inside the white card panels */
+.bg-brand-surface input, 
+.bg-brand-surface select, 
+.bg-brand-surface textarea {
+  background-color: #FAF6F0 !important;
+  color: #1C1A17 !important;
+  border-color: #E6DFD3 !important;
+}
+
+.bg-brand-surface input:focus, 
+.bg-brand-surface select:focus, 
+.bg-brand-surface textarea:focus {
+  border-color: var(--color-brand-primary) !important;
+  outline: none !important;
+}
+
+.bg-brand-surface input::placeholder, 
+.bg-brand-surface textarea::placeholder {
+  color: #9A958C !important;
+}
+
+/* Option element within dropdowns */
+.bg-brand-surface select option {
+  background-color: #FFFFFF !important;
+  color: #1C1A17 !important;
+}
+
+/* Soft warm glow effect instead of dark orange */
+.bg-black, 
+.bg-black * {
+  /* Allow explicit custom text colors inside terminal to remain active */
+}
+
+/* Preserve active styles on selected workspace tabs */
+button.bg-brand-primary * {
+  color: #FFFFFF !important;
+}
+
+/* Premium shadows for modern off-white card presentation */
+.bg-brand-surface {
+  box-shadow: 0 10px 30px -10px rgba(92, 88, 82, 0.08), 0 1px 3px rgba(92, 88, 82, 0.04) !important;
+}
+
+
