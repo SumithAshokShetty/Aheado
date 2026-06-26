@@ -121,11 +121,29 @@ export default function App() {
 
   // Core view and connection states
   const [viewMode, setViewMode] = useState<'landing' | 'login' | 'workspace'>('landing');
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [conn, setConn] = useState<GoogleConnectionState>({
     isConnected: false,
     accessToken: null,
     userProfile: null
   });
+  const [isContinuousWatcherActive, setIsContinuousWatcherActive] = useState(false);
+  const [classroomDeadlines, setClassroomDeadlines] = useState<ClassroomDeadline[]>([]);
+  const [isScanningClassroom, setIsScanningClassroom] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isExecutingCommand, setIsExecutingCommand] = useState(false);
+  const [commandInput, setCommandInput] = useState("");
+  const [parsedCommandResult, setParsedCommandResult] = useState<any | null>(null);
+  const [activeSentEmails, setActiveSentEmails] = useState<Array<{
+    id: string;
+    recipient: string;
+    eventName: string;
+    originalTime: string;
+    proposedTime: string;
+    alternativeTime: string;
+    status: "sent" | "reply_received" | "resolved";
+    sentAt: number;
+  }>>([]);
   const [isHeaderVerifying, setIsHeaderVerifying] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
   const [showTokenInput, setShowTokenInput] = useState(false);
