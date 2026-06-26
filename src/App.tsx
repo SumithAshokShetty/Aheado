@@ -977,20 +977,74 @@ If yes, generate the specific "Automated Calendar Decoupler" intercept or releva
           {/* CTA Buttons */}
           <div className="flex items-center gap-2">
             {conn.isConnected ? (
-              <>
+              <div className="relative">
                 <button
-                  onClick={() => { setViewMode('workspace'); }}
-                  className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-brand-primary text-white font-semibold text-[10px] sm:text-xs hover:bg-brand-accent active:scale-95 transition-all shadow-[0_4px_14px_rgba(249,115,22,0.3)] cursor-pointer"
+                  onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border border-brand-primary/30 hover:border-brand-primary transition-all active:scale-95 cursor-pointer flex items-center justify-center bg-brand-surface"
                 >
-                  Active Canvas
+                  {conn.userProfile?.picture ? (
+                    <img 
+                      src={conn.userProfile.picture} 
+                      alt={conn.userProfile.name} 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-full h-full rounded-full bg-brand-primary/10 text-brand-primary flex items-center justify-center font-bold text-sm">
+                      {conn.userProfile?.name?.charAt(0) || "U"}
+                    </div>
+                  )}
                 </button>
-                <button
-                  onClick={handleHeaderSignOut}
-                  className="px-2.5 sm:px-3 py-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 font-semibold text-[10px] sm:text-xs active:scale-95 transition-all cursor-pointer"
-                >
-                  Sign Out
-                </button>
-              </>
+
+                <AnimatePresence>
+                  {showProfileDropdown && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-2.5 w-56 rounded-2xl border border-brand-border bg-brand-surface p-4 shadow-xl z-50 text-left"
+                    >
+                      <div className="mb-3 pb-3 border-b border-brand-border/40">
+                        <p className="text-xs font-bold text-stone-900 truncate">
+                          {conn.userProfile?.name || "Connected User"}
+                        </p>
+                        <p className="text-[10px] text-brand-text-secondary font-mono truncate mt-0.5">
+                          {conn.userProfile?.email || ""}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider font-mono">Workspace Linked</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        {viewMode !== 'workspace' && (
+                          <button
+                            onClick={() => {
+                              setViewMode('workspace');
+                              setShowProfileDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-stone-800 hover:bg-brand-bg transition-all cursor-pointer"
+                          >
+                            Go to Active Canvas
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            handleHeaderSignOut();
+                            setShowProfileDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-all cursor-pointer flex items-center justify-between"
+                        >
+                          <span>Sign Out</span>
+                          <span className="text-[10px] font-normal text-rose-400 font-mono">Disconnect</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             ) : (
               <>
                 <button
