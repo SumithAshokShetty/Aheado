@@ -297,6 +297,141 @@ export default function App() {
     }, 4000);
   };
 
+  // Native desktop/mobile Web Notifications state and helper functions
+  const [notificationPermission, setNotificationPermission] = useState<string>(
+    typeof Notification !== "undefined" ? Notification.permission : "default"
+  );
+
+  const requestNotificationPermission = async () => {
+    if (typeof Notification === "undefined") {
+      triggerToast("Desktop/mobile notifications are not supported in this browser.");
+      return;
+    }
+
+    if (Notification.permission === "denied") {
+      triggerToast("🔒 Alerts are currently blocked by your browser. Please click the lock icon in the address bar, allow 'Notifications', and reload!");
+      return;
+    }
+
+    try {
+      const permission = await new Promise<NotificationPermission>((resolve) => {
+        try {
+          const promiseResult = Notification.requestPermission(resolve);
+          if (promiseResult && typeof promiseResult.then === "function") {
+            promiseResult.then(resolve);
+          }
+        } catch (e) {
+          resolve(Notification.permission);
+        }
+      });
+
+      setNotificationPermission(permission);
+      
+      if (permission === "granted") {
+        triggerToast("🔔 Native OS Alerts enabled successfully! Sending welcome alert...");
+        
+        const options = {
+          body: "You will now receive real-time out-of-browser conflict warnings.",
+          icon: "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f6e1.png",
+          badge: "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f6e1.png",
+          tag: "aheado-status"
+        };
+
+        try {
+          if ("serviceWorker" in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.showNotification("Aheado Guard Activated", options);
+          } else {
+            new Notification("Aheado Guard Activated", options);
+          }
+        } catch (e) {
+          console.warn("Could not fire initial welcome notification, fallback to simple:", e);
+          try {
+            new Notification("Aheado Guard Activated", {
+              body: "You will now receive real-time out-of-browser conflict warnings."
+            });
+          } catch (err) {
+            console.error("Direct notification failed", err);
+          }
+        }
+      } else {
+        triggerToast("⚠️ Notifications were dismissed. Click again to enable system-native alerts!");
+      }
+    } catch (err: any) {
+      console.error("Error requesting notification permission", err);
+      triggerToast(`🔒 Browser restriction: ${err.message || "Failed to trigger permission prompt"}. Try opening the app in a new tab!`);
+    }
+  };
+
+  const triggerNativeNotification = (title: string, bodyText: string) => {
+    if (typeof Notification === "undefined") {
+      console.warn("Browser does not support desktop/mobile notifications.");
+      return;
+    }
+
+    const deliverAlert = async () => {
+      const options = {
+        body: bodyText,
+        icon: "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f6e1.png",
+        badge: "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f6e1.png",
+        tag: "aheado-alert",
+        requireInteraction: true
+      };
+
+      try {
+        if ("serviceWorker" in navigator) {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.showNotification(title, options);
+          } catch (err) {
+            console.warn("ServiceWorker notification failed, using legacy fallback:", err);
+            const notification = new Notification(title, options);
+            notification.onclick = () => {
+              window.focus();
+              setViewMode("workspace");
+            };
+          }
+        } else {
+          const notification = new Notification(title, options);
+          notification.onclick = () => {
+            window.focus();
+            setViewMode("workspace");
+          };
+        }
+      } catch (err) {
+        console.error("Failed to deliver native Notification:", err);
+        try {
+          const notification = new Notification(title, { body: bodyText });
+          notification.onclick = () => {
+            window.focus();
+            setViewMode("workspace");
+          };
+        } catch (innerErr) {
+          console.error("Simple notification fallback failed too:", innerErr);
+        }
+      }
+    };
+
+    if (Notification.permission === "granted") {
+      deliverAlert();
+    } else if (Notification.permission !== "denied") {
+      try {
+        Notification.requestPermission().then(permission => {
+          setNotificationPermission(permission);
+          if (permission === "granted") {
+            deliverAlert();
+          }
+        }).catch(err => {
+          console.error("Async requestPermission failed", err);
+        });
+      } catch (err) {
+        console.error("Synchronous requestPermission error", err);
+      }
+    } else {
+      console.warn("Notifications blocked. Guidance toast ready.");
+    }
+  };
+
   // Switch scenario preset
   const handleSelectPreset = (scenarioId: string) => {
     const found = SCENARIOS.find(s => s.id === scenarioId);
