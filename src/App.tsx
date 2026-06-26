@@ -1188,6 +1188,190 @@ If yes, generate the specific "Automated Calendar Decoupler" intercept or releva
                   </div>
                 </div>
 
+                {/* Direct Voice & Text Dispatcher Console */}
+                <div className="p-6 rounded-lg border border-brand-border bg-brand-surface relative">
+                  <h3 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest mb-3 flex items-center gap-1.5 font-mono">
+                    <Mic className="w-3.5 h-3.5 text-brand-primary" />
+                    Workspace Command Dispatcher
+                  </h3>
+                  <p className="text-[11px] text-brand-text-secondary mb-4 leading-relaxed font-sans">
+                    Say or type a directive to add things to your Calendar, Gmail, or find school deadlines.
+                  </p>
+                  
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="text"
+                      placeholder="e.g., Schedule doctor visit tomorrow at 3 PM"
+                      value={commandInput}
+                      onChange={(e) => setCommandInput(e.target.value)}
+                      className="flex-1 bg-black border border-brand-border rounded-lg px-3 py-2 text-xs text-white placeholder:text-stone-500 focus:outline-none focus:border-brand-primary transition-all font-sans"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleToggleVoiceListening}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        isListening 
+                          ? "bg-rose-500/10 border-rose-500 text-rose-400 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.2)]" 
+                          : "bg-stone-900 border-brand-border text-brand-primary hover:bg-stone-800"
+                      }`}
+                      title={isListening ? "Listening... click to stop" : "Record Speech Command"}
+                    >
+                      <Mic className="w-4 h-4 shrink-0" />
+                      <span>{isListening ? "Listening" : "Voice"}</span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleExecuteCommand}
+                    disabled={isExecutingCommand || !commandInput.trim()}
+                    className="w-full py-2.5 rounded-lg bg-brand-primary hover:bg-brand-accent text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed uppercase tracking-wider font-mono shadow-md"
+                  >
+                    {isExecutingCommand ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" />
+                    )}
+                    Dispatch AI Action
+                  </button>
+
+                  {/* Parsed Command Preview Stage */}
+                  {parsedCommandResult && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mt-4 p-4.5 rounded-lg bg-black/60 border border-brand-border text-white text-left"
+                    >
+                      <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-stone-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-[10px] text-emerald-400 font-bold tracking-wider uppercase font-mono">
+                          Parsed Workspace Action
+                        </span>
+                      </div>
+
+                      {parsedCommandResult.type === "calendar" && parsedCommandResult.calendar && (
+                        <div className="space-y-1">
+                          <div className="text-xs font-bold text-stone-100 flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-brand-primary shrink-0" />
+                            {parsedCommandResult.calendar.summary}
+                          </div>
+                          <div className="text-[10px] text-stone-400 font-mono pl-5">
+                            <div>🗓️ Date: {parsedCommandResult.calendar.startTime ? new Date(parsedCommandResult.calendar.startTime).toLocaleDateString() : "Tomorrow"}</div>
+                            <div>🕒 Time: {parsedCommandResult.calendar.startTime ? new Date(parsedCommandResult.calendar.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "14:30"} - {parsedCommandResult.calendar.endTime ? new Date(parsedCommandResult.calendar.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "15:30"}</div>
+                          </div>
+                          <p className="text-[11px] text-stone-300 mt-2 bg-stone-900/50 p-2 rounded border border-stone-800 leading-relaxed font-sans">
+                            {parsedCommandResult.calendar.description}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleConfirmAndExecuteCommand}
+                            className="w-full mt-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors uppercase tracking-wider font-mono"
+                          >
+                            Push Event to Google Calendar
+                          </button>
+                        </div>
+                      )}
+
+                      {parsedCommandResult.type === "gmail" && parsedCommandResult.gmail && (
+                        <div className="space-y-1">
+                          <div className="text-xs font-bold text-stone-100 flex items-center gap-1">
+                            <span className="text-sm">✉️</span>
+                            Subject: {parsedCommandResult.gmail.subject}
+                          </div>
+                          <div className="text-[10px] text-stone-400 font-mono pl-5">
+                            <div>📩 Recipient: {parsedCommandResult.gmail.recipient}</div>
+                          </div>
+                          <p className="text-[11px] text-stone-300 mt-2 bg-stone-900/50 p-2.5 rounded border border-stone-800 leading-relaxed font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
+                            {parsedCommandResult.gmail.body}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleConfirmAndExecuteCommand}
+                            className="w-full mt-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors uppercase tracking-wider font-mono"
+                          >
+                            Stage Draft in Gmail Inbox
+                          </button>
+                        </div>
+                      )}
+
+                      {parsedCommandResult.type === "unknown" && (
+                        <div className="text-xs text-rose-400 font-mono">
+                          Could not determine an automatic action. Please specify 'Schedule...' or 'Draft email...'
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Google Classroom Deadlines Panel */}
+                <div className="p-6 rounded-lg border border-brand-border bg-brand-surface relative text-left">
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                    {isScanningClassroom ? (
+                      <span className="flex h-2 w-2 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-primary opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-primary"></span>
+                      </span>
+                    ) : (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    )}
+                    <span className="text-[9px] text-brand-text-secondary font-mono uppercase tracking-wider">
+                      {isScanningClassroom ? "Scanning Classes..." : "Classroom Synced"}
+                    </span>
+                  </div>
+
+                  <h3 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest mb-3 flex items-center gap-1.5 font-mono">
+                    <GraduationCap className="w-4 h-4 text-brand-primary" />
+                    Google Classroom Deadlines
+                  </h3>
+                  <p className="text-[11px] text-brand-text-secondary mb-4 leading-relaxed font-sans">
+                    Traversing student classes to check for upcoming academic coursework and exams.
+                  </p>
+
+                  <div className="space-y-3">
+                    {classroomDeadlines.length === 0 ? (
+                      <div className="py-6 border border-dashed border-brand-border rounded-lg text-center">
+                        <GraduationCap className="w-8 h-8 text-stone-600 mx-auto mb-2 opacity-50" />
+                        <p className="text-[11px] text-stone-500 max-w-xs mx-auto font-sans leading-relaxed">
+                          No Classroom deadlines listed yet. Run "Scan Live Workspace" to trigger coursework traversal.
+                        </p>
+                      </div>
+                    ) : (
+                      classroomDeadlines.map((item) => {
+                        const isOverdue = new Date(item.dueDate) < new Date();
+                        return (
+                          <div 
+                            key={item.id} 
+                            className="p-3.5 rounded-lg bg-black/30 border border-brand-border hover:border-brand-primary/30 transition-all text-left"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className="text-[9px] font-bold text-brand-primary uppercase tracking-wider font-mono bg-brand-primary/10 px-1.5 py-0.5 rounded">
+                                  {item.courseName}
+                                </span>
+                                <h4 className="text-xs font-extrabold text-white mt-1.5 font-sans tracking-wide">
+                                  {item.title}
+                                </h4>
+                              </div>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded shrink-0 ${
+                                isOverdue 
+                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" 
+                                  : "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                              }`}>
+                                {isOverdue ? "Overdue" : `Due ${item.dueDate}`}
+                              </span>
+                            </div>
+                            {item.description && (
+                              <p className="text-[10px] text-stone-400 mt-2 line-clamp-2 leading-relaxed font-sans">
+                                {item.description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
                 {/* Manual Task Injector */}
                 <div className="p-6 rounded-lg border border-brand-border bg-brand-surface">
                   <h3 className="text-xs font-bold text-brand-text-secondary uppercase tracking-widest mb-4 font-mono">
