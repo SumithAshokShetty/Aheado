@@ -678,9 +678,146 @@ If yes, generate the specific "Automated Calendar Decoupler" intercept or releva
         reassurance: "Relax, Aheado caught the collision. Your schedule is decoupled successfully."
       };
       setEvalResult(simulatedOverlapData);
+      
+      triggerNativeNotification(
+        "🛡️ Autonomous Intercept: Automated Calendar Decoupler",
+        "Risk Score: 94/100. [Urgency: CRITICAL] Aheado detected a double-booking: 'Pediatric Doctor Checkup' vs 'Technical Interview'. Click to resolve!"
+      );
     } finally {
       setIsEvaluating(false);
       setIsScanningWorkspace(false);
+    }
+  };
+
+  // Speech-to-text voice recognition handler
+  const handleToggleVoiceListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      triggerToast("❌ Web Speech API is not supported in this browser.");
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setLogs(prev => ["[VOICE] Speech recognition active. Listening for commands...", ...prev]);
+      triggerToast("🎙️ Listening... Speak your calendar or gmail command now.");
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setCommandInput(transcript);
+      setLogs(prev => [`[VOICE] Received: "${transcript}"`, ...prev]);
+      triggerToast("✅ Voice input captured!");
+    };
+
+    recognition.onerror = (e: any) => {
+      console.error("Speech recognition error", e);
+      setIsListening(false);
+      triggerToast(`⚠️ Voice input issue: ${e.error || "unknown"}`);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
+  // Submit and evaluate direct text/voice command
+  const handleExecuteCommand = async () => {
+    const command = commandInput.trim();
+    if (!command) {
+      triggerToast("⚠️ Please type or record a command first!");
+      return;
+    }
+
+    setIsExecutingCommand(true);
+    setLogs(prev => [`[COMMAND] Evaluating action dispatcher for: "${command}"...`, ...prev]);
+
+    try {
+      const res = await fetch("/api/proactive-ai/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command })
+      });
+
+      const data = await res.json();
+      setParsedCommandResult(data);
+
+      if (data.type === "unknown") {
+        setLogs(prev => [`[COMMAND] Unrecognized command type: "${command}"`, ...prev]);
+        triggerToast("❓ Command unrecognized. Try 'Schedule doctor appt...' or 'Draft email...'");
+      } else {
+        setLogs(prev => [`[COMMAND] Successfully parsed as "${data.type}"! Ready to execute.`, ...prev]);
+        triggerToast(`🎉 Command parsed as ${data.type}! Review and confirm execution below.`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌ Failed to parse voice/text command.");
+    } finally {
+      setIsExecutingCommand(false);
+    }
+  };
+
+  // Confirm and actually execute the parsed action to Calendar/Gmail
+  const handleConfirmAndExecuteCommand = async () => {
+    if (!parsedCommandResult) return;
+
+    const currentConn = loadConnectionState();
+    const isLive = currentConn.isConnected && currentConn.accessToken;
+
+    try {
+      if (parsedCommandResult.type === "calendar") {
+        const { summary, description, startTime, endTime } = parsedCommandResult.calendar;
+        if (isLive && currentConn.accessToken) {
+          setLogs(prev => [`[CALENDAR] Creating live Google Calendar event: "${summary}"...`, ...prev]);
+          await createCalendarEvent(currentConn.accessToken, summary, description, startTime, endTime);
+          setLogs(prev => [`[RESOLVED] Successfully added "${summary}" to your Google Calendar!`, ...prev]);
+          triggerToast(`📅 Successfully scheduled "${summary}" on your real Google Calendar!`);
+        } else {
+          setLogs(prev => [
+            `[SANDBOX] Simulating Google Calendar event creation:`,
+            `  Summary: "${summary}"`,
+            `  Start: ${startTime}`,
+            `  End: ${endTime}`,
+            ...prev
+          ]);
+          triggerToast(`📅 [Sandbox] Scheduled "${summary}" successfully!`);
+        }
+      } else if (parsedCommandResult.type === "gmail") {
+        const { recipient, subject, body } = parsedCommandResult.gmail;
+        if (isLive && currentConn.accessToken) {
+          setLogs(prev => [`[GMAIL] Creating live draft in your Gmail inbox...`, ...prev]);
+          await createGmailDraft(currentConn.accessToken, recipient, subject, body);
+          setLogs(prev => [`[RESOLVED] Successfully drafted email to ${recipient}!`, ...prev]);
+          triggerToast(`✉️ Draft created in your real Gmail inbox for ${recipient}!`);
+        } else {
+          setLogs(prev => [
+            `[SANDBOX] Simulating Gmail draft creation:`,
+            `  To: ${recipient}`,
+            `  Subject: ${subject}`,
+            ...prev
+          ]);
+          triggerToast(`✉️ [Sandbox] Email draft for ${recipient} generated successfully!`);
+        }
+      }
+
+      setParsedCommandResult(null);
+      setCommandInput("");
+    } catch (err: any) {
+      console.error("Execution error", err);
+      triggerToast(`❌ Failed to execute action on Workspace: ${err.message || err}`);
+      setLogs(prev => [`[ERROR] Action execution failed: ${err.message || err}`, ...prev]);
     }
   };
 
