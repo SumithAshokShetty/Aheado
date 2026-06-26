@@ -741,276 +741,236 @@ If yes, generate the specific "Automated Calendar Decoupler" intercept or releva
           {/* TOP HERO WRAPPER - exactly h-[850px] with central orange radial glow & V-bars graph */}
           <header className="relative w-full h-[850px] flex flex-col justify-between items-center pt-36 pb-12 overflow-hidden border-b border-brand-border/20">
         
-        {/* Central Radial Glow Layer */}
-        <div className="absolute inset-0 glow-radial pointer-events-none z-0" />
+            {/* Central Radial Glow Layer */}
+            <div className="absolute inset-0 glow-radial pointer-events-none z-0" />
 
-        {/* 48 Fluid Column Bars symmetrically scaling quadratically out from center */}
-        <div className="absolute bottom-12 left-0 right-0 h-[380px] sm:h-[420px] md:h-[480px] lg:h-[520px] w-full flex items-end justify-between px-3 sm:px-6 md:px-10 lg:px-14 gap-0.5 sm:gap-1 pointer-events-none z-0 overflow-hidden">
-          {bars.map((bar) => {
-            // Symmetrically reduce density on mobile and tablet to prevent narrow crowding
-            let responsiveClasses = "flex-1 max-w-[6px] sm:max-w-[10px] md:max-w-[14px] lg:max-w-[16px] rounded-t-full transition-all duration-300";
-            if (bar.index % 4 !== 0) {
-              responsiveClasses += " hidden lg:block";
-            } else if (bar.index % 2 !== 0) {
-              responsiveClasses += " hidden sm:block";
-            }
-            return (
-              <div
-                key={bar.index}
-                className={responsiveClasses}
-                style={{
-                  height: `${bar.heightPercent}%`,
-                  background: "linear-gradient(to top, #FAF6F0 0%, #ea580c 35%, #f97316 60%, #ffedd5 85%, rgba(0, 0, 0, 0) 100%)",
-                  animation: "float-bar 4.5s ease-in-out infinite",
-                  animationDelay: `${bar.dist * 0.12}s`,
-                  transformOrigin: "bottom"
-                }}
-              />
-            );
-          })}
-        </div>
-
-        {/* Centered Hero Area Content */}
-        <div className="max-w-4xl text-center px-4 z-10 flex flex-col items-center mt-8">
-          
-          {/* Primary Header */}
-          <h1 className="text-4xl sm:text-6xl md:text-7.5xl font-extrabold tracking-tight text-stone-900 mb-6 uppercase text-center font-sans leading-[1.05]">
-            DEADLINES MUTED. <br />
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-primary via-orange-500 to-amber-500">
-              ACTIONS EXECUTED IN REAL TIME.
-            </span>
-          </h1>
-
-          {/* Descriptive Sub-header */}
-          <p className="text-base sm:text-lg md:text-xl text-gray-700 max-w-3xl leading-relaxed mb-10 font-serif tracking-wide italic font-medium">
-            Aheado intercepts critical portal deadlines, automated bill streams, and calendar conflicts for high-intensity individuals before they turn red. Our background agents stage emergency actions, outlines, and reschedules while you focus on what counts.
-          </p>
-
-          {/* Hero Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
-            <button 
-              onClick={() => { 
-                if (conn.isConnected) {
-                  setViewMode('workspace');
-                  setActiveTab("canvas");
-                } else {
-                  setViewMode('login');
-                  triggerToast("🔐 Sign in with Google to access your Active Canvas.");
+            {/* 48 Fluid Column Bars symmetrically scaling quadratically out from center */}
+            <div className="absolute bottom-12 left-0 right-0 h-[380px] sm:h-[420px] md:h-[480px] lg:h-[520px] w-full flex items-end justify-between px-3 sm:px-6 md:px-10 lg:px-14 gap-0.5 sm:gap-1 pointer-events-none z-0 overflow-hidden">
+              {bars.map((bar) => {
+                // Symmetrically reduce density on mobile and tablet to prevent narrow crowding
+                let responsiveClasses = "flex-1 max-w-[6px] sm:max-w-[10px] md:max-w-[14px] lg:max-w-[16px] rounded-t-full transition-all duration-300";
+                if (bar.index % 4 !== 0) {
+                  responsiveClasses += " hidden lg:block";
+                } else if (bar.index % 2 !== 0) {
+                  responsiveClasses += " hidden sm:block";
                 }
-              }}
-              className="w-full sm:w-auto px-8 py-4 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-accent transition-all flex items-center justify-center gap-2 shadow-[0_10px_25px_rgba(249,115,22,0.25)] hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer"
-            >
-              Launch Active Canvas
-              <ArrowRight className="w-5 h-5 text-white" />
-            </button>
-            <button 
-              onClick={() => { 
-                if (conn.isConnected) {
-                  setViewMode('workspace');
-                  setActiveTab("skills");
-                } else {
-                  setViewMode('login');
-                  triggerToast("🔐 Sign in with Google to explore the Skills Engine.");
-                }
-              }}
-              className="w-full sm:w-auto px-8 py-4 rounded-lg border border-brand-border bg-brand-surface text-stone-900 font-semibold hover:border-brand-primary hover:bg-brand-bg transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer animate-none"
-            >
-              Explore Skills Engine
-              <Sparkles className="w-4 h-4 text-brand-primary" />
-            </button>
-          </div>
-        </div>
-
-        {/* Bottom mouse-scroll loop animator - styled beautifully as a real physical mouse controller layered above the bars */}
-        <div className="relative z-20 flex flex-col items-center gap-3 text-stone-600 hover:text-brand-primary transition-colors text-xs font-medium cursor-pointer select-none mb-6 group" onClick={handleGetStartedClick}>
-          <span className="font-mono tracking-widest text-[10px] md:text-xs font-extrabold text-stone-500 uppercase group-hover:text-brand-primary transition-colors">EXPLORE CANVAS</span>
-          <div className="w-10 h-16 rounded-3xl border-2 border-stone-300/80 bg-stone-50/80 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] p-2 flex justify-center items-start transition-all duration-300 group-hover:border-brand-primary/40 group-hover:shadow-[0_8px_30px_rgba(249,115,22,0.08)]">
-            <div className="w-1.5 h-3.5 rounded-full bg-brand-primary" style={{ animation: "scroll-mouse 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite" }} />
-          </div>
-        </div>
-
-      </header>
-
-      {/* LIVE INTERCEPTION TERMINAL CONSOLE */}
-      <section id="terminal" className="max-w-7xl mx-auto px-4 md:px-8 pt-6 pb-12 relative z-10 w-full">
-        <div className="p-6 md:p-8 rounded-lg border border-brand-border bg-brand-surface backdrop-blur-[16px] shadow-[0_24px_64px_rgba(0,0,0,0.8)] relative overflow-hidden">
-          
-          {/* Subtle decoration elements */}
-          <div className="absolute top-0 left-0 w-24 h-[1px] bg-gradient-to-r from-brand-primary to-transparent" />
-          <div className="absolute top-0 right-0 w-24 h-[1px] bg-gradient-to-l from-brand-accent to-transparent" />
-          
-          {/* Header Title with premium badge */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-6 border-b border-brand-border/40">
-            <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-brand-primary animate-pulse" />
-                <span className="text-xs font-bold text-brand-primary uppercase tracking-widest font-mono">
-                  Real-time Safeguard Pipeline
-                </span>
-              </div>
-              <h2 className="text-xl md:text-2xl font-extrabold tracking-tight text-stone-900 uppercase font-sans">
-                Live Interception Terminal Console
-              </h2>
-            </div>
-            <div className="flex items-center gap-2 bg-stone-100 px-3.5 py-1.5 rounded-lg border border-stone-200 text-[11px] font-mono text-stone-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>STAGED PROTOCOLS ONLINE</span>
-            </div>
-          </div>
-
-          {/* Top Metrics Bar: 3 grid items */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            
-            {/* Metric 1 */}
-            <div className="p-4.5 rounded-lg bg-orange-50/60 border border-orange-200 flex flex-col justify-between relative overflow-hidden group hover:border-brand-primary/40 transition-all shadow-sm">
-              <div className="absolute top-0 right-0 p-3 text-brand-primary/10 group-hover:text-brand-primary/20 transition-colors">
-                <Clock className="w-12 h-12 stroke-[1]" />
-              </div>
-              <div className="text-[10px] font-bold text-orange-800 uppercase tracking-widest font-mono mb-1.5">
-                Deadline-Safe Score
-              </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-stone-900 tracking-tight font-sans flex items-baseline gap-1">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-primary to-orange-500 font-sans">
-                  {deadlineSafeScore}%
-                </span>
-                <span className="text-xs font-semibold text-emerald-600 font-sans ml-1">Protected</span>
-              </div>
-              <p className="text-[10px] text-stone-500 mt-2 font-mono">
-                Micro-fluctuations active • Real-time guard ratio
-              </p>
-            </div>
-
-            {/* Metric 2 */}
-            <div className="p-4.5 rounded-lg bg-sky-50/90 border border-sky-200 flex flex-col justify-between relative overflow-hidden group hover:border-brand-primary/50 transition-all shadow-sm">
-              <div className="absolute top-0 right-0 p-3 text-sky-900/15 group-hover:text-sky-900/25 transition-colors">
-                <Layers className="w-12 h-12 stroke-[1]" />
-              </div>
-              <div className="text-[10px] font-bold text-sky-800 uppercase tracking-widest font-mono mb-1.5">
-                Active Portal Sync
-              </div>
-              <div className="text-sm font-bold text-sky-950 tracking-wide font-sans flex items-center gap-2 h-9">
-                <span className="text-sky-950 font-sans font-extrabold truncate">Canvas, Slack, Stripe, Jira OK</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-ping shrink-0" />
-              </div>
-              <p className="text-[10px] text-sky-800/80 mt-2 font-mono">
-                Listening for portal API streams • 120ms latency
-              </p>
-            </div>
-
-            {/* Metric 3 */}
-            <div className="p-4.5 rounded-lg bg-stone-50/80 border border-stone-200 flex flex-col justify-between relative overflow-hidden group hover:border-brand-primary/30 transition-all shadow-sm">
-              <div className="absolute top-0 right-0 p-3 text-stone-400/20 group-hover:text-brand-primary/20 transition-colors">
-                <Zap className="w-12 h-12 stroke-[1]" />
-              </div>
-              <div className="text-[10px] font-bold text-stone-600 uppercase tracking-widest font-mono mb-1.5">
-                Autopilot Mode
-              </div>
-              <div className="flex items-center h-9">
-                <span className="px-3.5 py-1.5 rounded-full bg-brand-primary/10 border border-brand-primary/30 text-[10px] font-bold text-brand-primary tracking-wider uppercase shadow-sm flex items-center gap-1.5 font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-brand-primary animate-pulse" />
-                  Active Intercept
-                </span>
-              </div>
-              <p className="text-[10px] text-stone-500 mt-2 font-mono">
-                Autonomous system intervention enabled
-              </p>
-            </div>
-
-          </div>
-
-          {/* Automated Event Stream console */}
-          <div className="rounded-lg border border-stone-850 bg-stone-900 p-5 relative shadow-inner">
-            
-            {/* Window controls styling like macOS */}
-            <div className="flex items-center justify-between pb-3.5 mb-3.5 border-b border-stone-800">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-brand-primary/80" />
-                <span className="w-2.5 h-2.5 rounded-full bg-brand-accent/80" />
-                <span className="w-2.5 h-2.5 rounded-full bg-stone-600" />
-                <span className="text-[10px] text-stone-400 font-mono font-bold ml-2 uppercase tracking-widest">
-                  automated_event_stream_stdout
-                </span>
-              </div>
-              <div className="text-[10px] text-stone-400 font-mono">
-                POLLING INTERNAL AGENTS
-              </div>
-            </div>
-
-            {/* Scrollable event log body */}
-            <div ref={terminalContainerRef} className="h-48 overflow-y-auto pr-2 flex flex-col gap-2.5 font-mono text-[11px] md:text-xs leading-relaxed custom-scrollbar text-left scroll-smooth">
-              {eventLogs.map((log, idx) => {
-                let textClass = "text-stone-300";
-                if (log.text.startsWith("[INTERCEPTED]")) textClass = "text-brand-primary font-bold";
-                else if (log.text.startsWith("[AUTOPILOT]")) textClass = "text-orange-400 font-medium";
-                else if (log.text.startsWith("[RESOLVED]")) textClass = "text-emerald-400 font-bold";
-                else if (log.text.startsWith("[MITIGATION]")) textClass = "text-sky-400 font-medium";
-                else if (log.text.startsWith("[MONITORING]")) textClass = "text-stone-400";
-
                 return (
-                  <div key={idx} className="flex items-start gap-2 border-b border-stone-800/60 pb-1.5">
-                    <span className="text-stone-500 shrink-0 select-none">[{log.time}]</span>
-                    <span className={textClass}>{log.text}</span>
-                  </div>
+                  <div
+                    key={bar.index}
+                    className={responsiveClasses}
+                    style={{
+                      height: `${bar.heightPercent}%`,
+                      background: "linear-gradient(to top, #FAF6F0 0%, #ea580c 35%, #f97316 60%, #ffedd5 85%, rgba(0, 0, 0, 0) 100%)",
+                      animation: "float-bar 4.5s ease-in-out infinite",
+                      animationDelay: `${bar.dist * 0.12}s`,
+                      transformOrigin: "bottom"
+                    }}
+                  />
                 );
               })}
             </div>
 
-          </div>
+            {/* Centered Hero Area Content */}
+            <div className="max-w-4xl text-center px-4 z-10 flex flex-col items-center mt-8">
+              
+              {/* Primary Header */}
+              <h1 className="text-4xl sm:text-6xl md:text-7.5xl font-extrabold tracking-wide text-stone-900 mb-8 uppercase text-center font-sans leading-[1.15]">
+                DEADLINES MUTED. <br />
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-primary via-orange-500 to-amber-500">
+                  ACTIONS EXECUTED <br />
+                  IN MINUTES
+                </span>
+              </h1>
 
-        </div>
-      </section>
+              {/* Short tagline */}
+              <p className="text-lg sm:text-xl md:text-2xl text-stone-700 max-w-3xl mb-12 font-sans tracking-wide font-medium">
+                A last-minute lifesaver for academic and workspace deadlines.
+              </p>
+
+              {/* Hero Buttons */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
+                <button 
+                  onClick={() => { 
+                    if (conn.isConnected) {
+                      setViewMode('workspace');
+                    } else {
+                      setViewMode('login');
+                      triggerToast("🔐 Sign in with Google to access your Active Canvas.");
+                    }
+                  }}
+                  className="w-full sm:w-auto px-8 py-4 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-accent transition-all flex items-center justify-center gap-2 shadow-[0_10px_25px_rgba(249,115,22,0.25)] hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer"
+                >
+                  Launch Active Canvas
+                  <ArrowRight className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            </div>
+
+            {/* Bottom mouse-scroll loop animator - styled beautifully as a real physical mouse controller layered above the bars */}
+            <div className="relative z-20 flex flex-col items-center gap-3 text-stone-600 hover:text-brand-primary transition-colors text-xs font-medium cursor-pointer select-none mb-16 -translate-y-12 group" onClick={handleGetStartedClick}>
+              <span className="font-mono tracking-widest text-[10px] md:text-xs font-extrabold text-stone-500 uppercase group-hover:text-brand-primary transition-colors">EXPLORE CANVAS</span>
+              <div className="w-10 h-16 rounded-3xl border-2 border-stone-300/80 bg-stone-50/80 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] p-2 flex justify-center items-start transition-all duration-300 group-hover:border-brand-primary/40 group-hover:shadow-[0_8px_30px_rgba(249,115,22,0.08)]">
+                <div className="w-1.5 h-3.5 rounded-full bg-brand-primary" style={{ animation: "scroll-mouse 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite" }} />
+              </div>
+            </div>
+
+          </header>
+
+          {/* ABOUT & TERMINAL STREAM SPLIT GRID LAYOUT */}
+          <section id="about" className="max-w-7xl mx-auto px-4 md:px-8 py-20 relative z-10 w-full border-b border-brand-border/20">
+            {/* Central Radial Glow Layer */}
+            <div className="absolute inset-0 glow-radial pointer-events-none z-0 opacity-40" />
+
+            <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center z-10">
+              
+              {/* Left Column: About Description & CTA */}
+              <div className="lg:col-span-5 flex flex-col text-left">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-brand-primary/20 bg-brand-primary/10 text-[10px] font-bold tracking-widest text-brand-primary uppercase mb-6 self-start font-mono">
+                  <Zap className="w-3.5 h-3.5" />
+                  Autonomous Safeguard Agent
+                </div>
+                
+                <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-stone-900 mb-6 uppercase font-sans leading-[1.1]">
+                  ABOUT AHEADO
+                </h1>
+
+                <p className="text-sm sm:text-base text-gray-750 leading-relaxed mb-6 font-serif italic font-medium">
+                  Aheado intercepts critical portal deadlines, automated bill streams, and calendar conflicts for high-intensity individuals before they turn red. Our background agents stage emergency actions, outlines, and reschedules while you focus on what counts.
+                </p>
+
+                {/* Core Value Props List (About details) */}
+                <div className="space-y-4 mb-8">
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-brand-primary/10 flex items-center justify-center text-brand-primary shrink-0 mt-0.5">
+                      <Zap className="w-3 h-3 fill-brand-primary" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-stone-900 font-sans uppercase tracking-wider">Autonomous Scanning</h4>
+                      <p className="text-[11px] text-gray-655 leading-relaxed font-sans mt-0.5">
+                        Background integration with Gmail, Google Calendar, and Google Classroom to parse incoming messages & academic deadlines.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-brand-primary/10 flex items-center justify-center text-brand-primary shrink-0 mt-0.5">
+                      <Sparkles className="w-3 h-3 fill-brand-primary" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-stone-900 font-sans uppercase tracking-wider">Agentic Pre-Execution</h4>
+                      <p className="text-[11px] text-gray-655 leading-relaxed font-sans mt-0.5">
+                        Instantly stages emergency study blueprints, conceptual assignment outlines, and polite reschedule requests automatically.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Terminal Log console */}
+              <div className="lg:col-span-7 w-full">
+                <div className="p-5 md:p-6 rounded-xl border border-brand-border bg-brand-surface backdrop-blur-[16px] shadow-[0_24px_64px_rgba(0,0,0,0.06)] relative overflow-hidden text-left">
+                  
+                  {/* Subtle decoration elements */}
+                  <div className="absolute top-0 left-0 w-24 h-[1px] bg-gradient-to-r from-brand-primary to-transparent" />
+                  <div className="absolute top-0 right-0 w-24 h-[1px] bg-gradient-to-l from-brand-accent to-transparent" />
+                  
+                  {/* Header Title with premium badge */}
+                  <div className="flex items-center justify-between pb-4 mb-4 border-b border-brand-border/40">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
+                        <span className="text-[10px] font-bold text-brand-primary uppercase tracking-widest font-mono">
+                          Safeguard Pipeline
+                        </span>
+                      </div>
+                      <h2 className="text-sm font-extrabold tracking-tight text-stone-900 uppercase font-sans">
+                        Interception Terminal Stream
+                      </h2>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-stone-100 px-2.5 py-1 rounded-lg border border-stone-200 text-[9px] font-mono text-stone-600 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>LIVE FEED</span>
+                    </div>
+                  </div>
+
+                  {/* Compact Mini Metrics Grid inside Terminal section */}
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    {/* Metric 1 */}
+                    <div className="p-3 rounded-lg bg-orange-50/60 border border-orange-200 flex flex-col justify-between">
+                      <span className="text-[9px] font-bold text-orange-800 uppercase tracking-widest font-mono mb-1">
+                        Safe Score
+                      </span>
+                      <span className="text-sm font-extrabold text-stone-900 font-sans bg-clip-text text-transparent bg-gradient-to-r from-brand-primary to-orange-500">
+                        {deadlineSafeScore}% Protected
+                      </span>
+                    </div>
+                    {/* Metric 2 */}
+                    <div className="p-3 rounded-lg bg-sky-50/90 border border-sky-200 flex flex-col justify-between">
+                      <span className="text-[9px] font-bold text-sky-800 uppercase tracking-widest font-mono mb-1">
+                        Autopilot Sync
+                      </span>
+                      <span className="text-[11px] font-bold text-sky-950 font-sans truncate">
+                        Active Listeners OK
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Automated Event Stream console */}
+                  <div className="rounded-lg border border-stone-850 bg-stone-900 p-4 relative shadow-inner">
+                    {/* Window controls styling like macOS */}
+                    <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-stone-800">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-brand-primary/80" />
+                        <span className="w-2 h-2 rounded-full bg-brand-accent/80" />
+                        <span className="w-2 h-2 rounded-full bg-stone-600" />
+                        <span className="text-[9px] text-stone-400 font-mono font-bold ml-1.5 uppercase tracking-widest">
+                          event_stream_stdout
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-stone-400 font-mono">
+                        POLLING AGENTS
+                      </div>
+                    </div>
+
+                    {/* Scrollable event log body */}
+                    <div ref={terminalContainerRef} className="h-44 overflow-y-auto pr-1 flex flex-col gap-2 font-mono text-[10px] md:text-[11px] leading-relaxed custom-scrollbar text-left scroll-smooth">
+                      {eventLogs.map((log, idx) => {
+                        let textClass = "text-stone-300";
+                        if (log.text.startsWith("[INTERCEPTED]")) textClass = "text-brand-primary font-bold";
+                        else if (log.text.startsWith("[AUTOPILOT]")) textClass = "text-orange-400 font-medium";
+                        else if (log.text.startsWith("[RESOLVED]")) textClass = "text-emerald-400 font-bold";
+                        else if (log.text.startsWith("[MITIGATION]")) textClass = "text-sky-400 font-medium";
+                        else if (log.text.startsWith("[MONITORING]")) textClass = "text-stone-400";
+
+                        return (
+                          <div key={idx} className="flex items-start gap-1.5 border-b border-stone-800/60 pb-1">
+                            <span className="text-stone-500 shrink-0 select-none">[{log.time}]</span>
+                            <span className={textClass}>{log.text}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+            </div>
+          </section>
         </>
       )}
 
       {viewMode === 'workspace' && (
         <>
           {/* DETAILED ACTIVE WORKSPACE AREA */}
-          <section ref={canvasSectionRef} className="max-w-7xl mx-auto px-4 md:px-8 py-20 relative z-10">
+          <section ref={canvasSectionRef} className="max-w-7xl mx-auto px-4 md:px-8 pt-36 pb-20 relative z-10">
         
-        {/* Navigation Tab for active sections */}
-        <div className="flex items-center justify-center mb-12 px-4 w-full">
-          <div className="flex bg-brand-surface p-1 rounded-lg border border-brand-border w-full max-w-md sm:w-auto">
-            <button 
-              onClick={() => setActiveTab("canvas")}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2.5 px-3 sm:px-6 py-2 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                activeTab === "canvas" 
-                  ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20" 
-                  : "text-brand-text-secondary hover:text-stone-900"
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5 sm:w-4 h-4 shrink-0" />
-              <span className="truncate">Active Canvas</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab("skills")}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2.5 px-3 sm:px-6 py-2 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                activeTab === "skills" 
-                  ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20" 
-                  : "text-brand-text-secondary hover:text-stone-900"
-              }`}
-            >
-              <Sliders className="w-3.5 h-3.5 sm:w-4 h-4 shrink-0" />
-              <span className="truncate">Skills Engine</span>
-            </button>
-          </div>
-        </div>
-
-        <AnimatePresence mode="wait">
-          {activeTab === "canvas" ? (
-            <motion.div
-              key="canvas-tab"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
-              className="flex flex-col gap-6"
-            >
-              <GoogleWorkspaceConsole 
-                onConnectionChange={(newConn) => setConn(newConn)}
-                triggerToast={triggerToast} 
-                addSystemLog={(log) => setLogs(prev => [log, ...prev])} 
-              />
-              
+        <motion.div
+          key="canvas-tab"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="flex flex-col gap-6"
+        >
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               
               {/* LEFT COLUMN: Threat Simulator Studio & Input Controls (5 Cols) */}
