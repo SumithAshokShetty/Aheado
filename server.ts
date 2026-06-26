@@ -10,26 +10,120 @@ const execPromise = promisify(exec);
 
 dotenv.config();
 
-// Lazy initialization for Gemini API.
-let genAI: GoogleGenAI | null = null;
+// Multi-project Gemini API Key Rotation Array setup using all 8 keys in the Secrets panel
+const keysPool = [
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_2,
+  process.env.GEMINI_API_KEY_3,
+  process.env.GEMINI_API_KEY_4,
+  process.env.GEMINI_API_KEY_5,
+  process.env.GEMINI_API_KEY_6,
+  process.env.GEMINI_API_KEY_7,
+  process.env.GEMINI_API_KEY_8
+].filter(Boolean) as string[];
 
-function getGeminiClient() {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.warn("GEMINI_API_KEY is not defined in the environment. AI features will run in mock demonstration mode.");
-      return null;
+let currentKeyIndex = 0;
+
+// Initialize GoogleGenAI instances for each active key in the pool
+const clientsPool = keysPool.map((key) => new GoogleGenAI({
+  apiKey: key,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
     }
-    genAI = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
+  }
+}));
+
+function repairTruncatedJson(str: string): string {
+  let inString = false;
+  let isEscaped = false;
+  const stack: ("{" | "[")[] = [];
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === "\\") {
+        isEscaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        stack.push("{");
+      } else if (char === "[") {
+        stack.push("[");
+      } else if (char === "}") {
+        if (stack.length > 0 && stack[stack.length - 1] === "{") {
+          stack.pop();
+        }
+      } else if (char === "]") {
+        if (stack.length > 0 && stack[stack.length - 1] === "[") {
+          stack.pop();
         }
       }
-    });
+    }
   }
-  return genAI;
+
+  let repaired = str;
+  if (inString) {
+    if (isEscaped) {
+      repaired = repaired.slice(0, -1);
+    }
+    repaired += '"';
+  }
+
+  while (stack.length > 0) {
+    const last = stack.pop();
+    if (last === "{") {
+      repaired += "}";
+    } else if (last === "[") {
+      repaired += "]";
+    }
+  }
+
+  repaired = repaired.replace(/,\s*([}\]])/g, "$1");
+  repaired = repaired.replace(/:\s*([}\]])/g, ": null$1");
+  repaired = repaired.trim().replace(/,$/, "");
+
+  return repaired;
+}
+
+function cleanJsonString(str: string): string {
+  let cleaned = str.trim();
+  
+  // Strip markdown codeblock wraps if present
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\n?/i, "");
+    cleaned = cleaned.replace(/\n?```$/, "");
+    cleaned = cleaned.trim();
+  }
+  
+  // Normalize carriage returns to standard newlines
+  cleaned = cleaned.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  
+  // Escape literal backslashes that are not already part of valid JSON escapes
+  // This matches any backslash that is not followed by ", \, /, b, f, n, r, t, or uXXXX
+  cleaned = cleaned.replace(/\\(?!["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
+  
+  // Self-repair any truncation or unclosed elements in the JSON output
+  cleaned = repairTruncatedJson(cleaned);
+  
+  // Clean up trailing commas in objects and arrays before closing delimiters
+  cleaned = cleaned.replace(/,(\s*[\]}])/g, "$1");
+  
+  return cleaned;
+}
+
+function getGeminiClient() {
+  if (clientsPool.length === 0) {
+    console.warn("No GEMINI_API_KEYS are defined in the environment. AI features will run in mock demonstration mode.");
+    return null;
+  }
+  return clientsPool[currentKeyIndex % clientsPool.length];
 }
 
 async function startServer() {
@@ -37,95 +131,246 @@ async function startServer() {
   app.use(express.json());
 
   // Helper to generate a highly dynamic, relevant evaluation response
+  // Helper to generate a highly dynamic, relevant evaluation response without hardcoded pattern-matching
   const generateDynamicEvaluation = (scenario: string, tasks: any[]) => {
     const textLower = (scenario || "").toLowerCase();
     
-    // Detect Calendar Event Name & Email Clash
-    let eventAName = "Pediatric Doctor Checkup";
-    let eventBName = "Technical Interview";
-    
-    const isMusicClass = textLower.includes("music") || textLower.includes("raju") || textLower.includes("sunday") || textLower.includes("hackathon");
+    let eventAName = "";
+    let eventBName = "";
+    let hasCalendarConflict = false;
+    let eventImportanceA = 70;
+    let eventImportanceB = 85;
+    let clashingTimeStr = "";
+    let recipientEmailA = "colleague@workspace-sync.com";
+    let recipientEmailB = "external-contact@workspace-sync.com";
+    let draftA = "";
+    let draftB = "";
 
-    // Check calendar events in scenario
-    if (isMusicClass) {
-      eventAName = "Unstop How to win a hackathon";
-      eventBName = "Music class";
-    } else if (textLower.includes("sunil")) {
-      eventAName = "Appointment with Dr Sunil";
-    } else if (textLower.includes("birthday")) {
-      eventAName = "Raju uncle's birthday";
-    } else if (textLower.includes("hackathon")) {
-      eventAName = "Unstop How to win a hackathon";
-    } else if (textLower.includes("doctor") || textLower.includes("pediatric")) {
-      eventAName = "Pediatric Doctor Checkup";
+    const parsedEvents: { summary: string; start: string; end: string }[] = [];
+    const parsedEmails: { from: string; subject: string; snippet: string }[] = [];
+
+    // Parse workspace lines dynamically
+    const lines = scenario.split("\n");
+    let inCalendar = false;
+    let inEmails = false;
+    let currentEmail: any = null;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.toUpperCase().includes("ACTIVE CALENDAR EVENTS:")) {
+        inCalendar = true;
+        inEmails = false;
+        continue;
+      }
+      if (trimmed.toUpperCase().includes("LATEST INBOX EMAILS:")) {
+        inCalendar = false;
+        inEmails = true;
+        continue;
+      }
+      if (trimmed.startsWith("Does this state present") || trimmed.startsWith("[")) {
+        inCalendar = false;
+        inEmails = false;
+        continue;
+      }
+
+      if (inCalendar && (trimmed.startsWith("-") || trimmed.startsWith("*"))) {
+        const match = trimmed.match(/^[-\*]\s*"(.*?)"\s+from\s+(\S+)\s+to\s+(\S+)/i);
+        if (match) {
+          parsedEvents.push({
+            summary: match[1],
+            start: match[2].trim(),
+            end: match[3].trim()
+          });
+        }
+      }
+
+      if (inEmails) {
+        if (trimmed.toUpperCase().startsWith("- FROM:") || trimmed.toUpperCase().startsWith("* FROM:")) {
+          if (currentEmail) {
+            parsedEmails.push(currentEmail);
+          }
+          currentEmail = {
+            from: trimmed.replace(/^[-\*]\s*FROM:/i, "").trim(),
+            subject: "",
+            snippet: ""
+          };
+        } else if (trimmed.toUpperCase().startsWith("SUBJECT:")) {
+          if (currentEmail) {
+            currentEmail.subject = trimmed.replace(/^SUBJECT:/i, "").trim();
+          }
+        } else if (trimmed.toUpperCase().startsWith("SNIPPET:")) {
+          if (currentEmail) {
+            currentEmail.snippet = trimmed.replace(/^SNIPPET:/i, "").trim();
+          }
+        }
+      }
     }
-    
-    // Check emails in scenario
-    if (isMusicClass) {
-      eventBName = "Music class";
-    } else if (textLower.includes("interview") || textLower.includes("interviewer")) {
-      eventBName = "Technical Interview";
-    } else if (textLower.includes("supabase")) {
-      eventBName = "Your Supabase Project status";
-    } else if (textLower.includes("verification")) {
-      eventBName = "2-Step Verification Security";
+    if (currentEmail) {
+      parsedEmails.push(currentEmail);
     }
 
-    // Check if calendar conflict/clash keywords are in scenario
-    const hasCalendarConflict = textLower.includes("conflict") || textLower.includes("clash") || textLower.includes("overlap") || textLower.includes("dr sunil") || textLower.includes("pediatric") || textLower.includes("interview") || isMusicClass;
+    // If parsing block failed to find anything, try regex search on entire text
+    if (parsedEvents.length === 0) {
+      const eventRegex = /[-\*]\s*"(.*?)"\s+from\s+(\S+)\s+to\s+(\S+)/gi;
+      let match;
+      while ((match = eventRegex.exec(scenario)) !== null) {
+        parsedEvents.push({
+          summary: match[1],
+          start: match[2].trim(),
+          end: match[3].trim()
+        });
+      }
+    }
+
+    // Helper to parse time from a string relative to the current local date
+    const parseProposedTime = (text: string): Date | null => {
+      const textLower = text.toLowerCase();
+      const baseDate = new Date(); // Current local time
+      let targetDate = new Date(baseDate.getTime());
+      
+      if (textLower.includes("tomorrow")) {
+        targetDate.setDate(targetDate.getDate() + 1);
+      } else if (textLower.includes("yesterday")) {
+        targetDate.setDate(targetDate.getDate() - 1);
+      } else {
+        const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        let foundDayIndex = -1;
+        for (let i = 0; i < days.length; i++) {
+          if (textLower.includes(days[i])) {
+            foundDayIndex = i;
+            break;
+          }
+        }
+        if (foundDayIndex !== -1) {
+          const currentDay = targetDate.getDay();
+          let daysToAdd = foundDayIndex - currentDay;
+          if (daysToAdd <= 0) {
+            daysToAdd += 7;
+          }
+          targetDate.setDate(targetDate.getDate() + daysToAdd);
+        }
+      }
+
+      let hours = 12;
+      let minutes = 0;
+      let timeFound = false;
+
+      // 24-hour style: e.g. "14:30" or "(14:30)" or "at 14:30"
+      const match24 = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+      if (match24) {
+        hours = parseInt(match24[1], 10);
+        minutes = parseInt(match24[2], 10);
+        timeFound = true;
+      } else {
+        // 12-hour style: e.g. "2:30 PM", "5 PM", "11:00 AM"
+        const match12 = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+        if (match12) {
+          let h = parseInt(match12[1], 10);
+          const m = match12[2] ? parseInt(match12[2], 10) : 0;
+          const ampm = match12[3].toLowerCase();
+          if (ampm === "pm" && h < 12) {
+            h += 12;
+          } else if (ampm === "am" && h === 12) {
+            h = 0;
+          }
+          hours = h;
+          minutes = m;
+          timeFound = true;
+        }
+      }
+
+      if (!timeFound) {
+        return null;
+      }
+
+      targetDate.setHours(hours, minutes, 0, 0);
+      return targetDate;
+    };
+
+    // Helper to check for temporal overlaps
+    const isOverlapping = (proposedTime: Date, startStr: string, endStr: string) => {
+      const proposed = proposedTime.getTime();
+      const start = new Date(startStr).getTime();
+      const end = new Date(endStr).getTime();
+      if (isNaN(proposed) || isNaN(start) || isNaN(end)) return false;
+      const proposedEnd = proposed + 60 * 60 * 1000; // Default 1 hour duration
+      return Math.max(proposed, start) < Math.min(proposedEnd, end);
+    };
+
+    // Evaluate overlaps dynamically
+    let foundClash = false;
+    for (const email of parsedEmails) {
+      const proposedTime = parseProposedTime(email.snippet) || parseProposedTime(email.subject);
+      if (!proposedTime) continue;
+
+      for (const evt of parsedEvents) {
+        // Skip general reminder-like keywords
+        if (evt.summary.toLowerCase().includes("birthday")) {
+          continue;
+        }
+
+        if (isOverlapping(proposedTime, evt.start, evt.end)) {
+          eventAName = evt.summary;
+          eventBName = email.subject || "Proposed Meeting";
+          hasCalendarConflict = true;
+          foundClash = true;
+
+          // Extract email address or default safely
+          const emailMatch = email.from.match(/<(.*?)>/);
+          recipientEmailB = emailMatch ? emailMatch[1] : email.from;
+          if (!recipientEmailB || recipientEmailB.includes("FROM:") || recipientEmailB.includes("@workspace-sync")) {
+            recipientEmailB = "external-contact@workspace-sync.com";
+          }
+          recipientEmailA = "colleague@workspace-sync.com";
+
+          const proposedHour = proposedTime.getHours();
+          const ampm = proposedHour >= 12 ? "PM" : "AM";
+          const hour12 = proposedHour % 12 || 12;
+          const minPart = proposedTime.getMinutes() ? `:${proposedTime.getMinutes().toString().padStart(2, "0")}` : "";
+          const dayName = proposedTime.toDateString().split(" ")[0]; // "Sat", "Sun", "Mon" etc.
+          
+          clashingTimeStr = `this ${dayName} at ${hour12}${minPart} ${ampm}`;
+
+          eventImportanceA = 75; // Pre-existing event
+          eventImportanceB = 85; // Proposed email invitation is slightly higher default
+
+          draftA = `Subject: Rescheduling Request: ${eventAName}\n\nDear Team,\n\nI am writing to request a shift for our "${eventAName}" scheduled for ${clashingTimeStr}.\n\nDue to an unavoidable last-minute scheduling overlap, could we reschedule this session to a different slot or Monday instead?\n\nThank you for your flexibility.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)`;
+          
+          draftB = `Subject: Rescheduling Proposal: ${eventBName}\n\nDear Contact,\n\nThank you for proposing the meeting. I would love to connect, but I have a pre-existing "${eventAName}" scheduled at that exact time.\n\nCould we reschedule our sync to a different time or Monday instead?\n\nThank you for your flexibility and understanding.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)`;
+          break;
+        }
+      }
+      if (foundClash) break;
+    }
 
     const hasBillDue = textLower.match(/(bill|invoice|pay|charge|fee|cost|price|credit|pge|energy|tuition)/);
     const hasAssignmentDeadline = textLower.match(/(deadline|hour|submit|assignment|test|school|project|exam|midterm|report|study)/) || (tasks && tasks.length > 0);
 
     const intercepts: any[] = [];
 
-    // Generate Calendar Reschedule Options if conflict detected
     if (hasCalendarConflict) {
-      const urgencyVal = isMusicClass ? "HIGH" : "HIGH";
-      const importanceA = isMusicClass ? 88 : 72;
-      const importanceB = isMusicClass ? 75 : 95;
-      const descA = isMusicClass
-        ? `Aheado detected a schedule overlap: "${eventAName}" (11:00 AM - 3:00 PM) clashes with your proposed "${eventBName}" this Sunday at 1:00 PM. Resolve by rescheduling the calendar appointment "${eventAName}" to Sunday at 3:30 PM (after the hackathon) so you can attend both.`
-        : `Aheado detected a schedule overlap: "${eventAName}" clashes with "${eventBName}" tomorrow at 2:30 PM. Resolve by rescheduling the calendar appointment "${eventAName}" to tomorrow at 4:30 PM (a safe slot) so you can attend the high-priority interview.`;
-      
-      const descB = isMusicClass
-        ? `Aheado detected a schedule overlap: "${eventAName}" clashes with "${eventBName}" on Sunday at 1:00 PM. Resolve by rescheduling the proposed "${eventBName}" to Sunday at 3:30 PM or Saturday at 1:00 PM (safe slots) to attend the Unstop hackathon live.`
-        : `Aheado detected a schedule overlap: "${eventAName}" clashes with "${eventBName}" tomorrow at 2:30 PM. Resolve by rescheduling the proposed "${eventBName}" to tomorrow at 4:00 PM or Monday at 11:00 AM (safe slots) to preserve your medical checkup.`;
-
-      const draftA = isMusicClass
-        ? `Subject: Rescheduling Request: Unstop Hackathon Team Sync - Sumith Shetty\n\nDear Hackathon Team,\n\nI am writing to request a shift for our "Unstop How to win a hackathon" team check-in session scheduled for Sunday at 1:00 PM.\n\nDue to an unavoidable music class overlap, could we reschedule our sync to Sunday at 3:30 PM, or Saturday afternoon instead?\n\nThank you for your flexibility.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)`
-        : `Subject: Rescheduling Request: ${eventAName} - Sumith Shetty\n\nDear Office Coordinator,\n\nI am writing to request a shift for my appointment ("${eventAName}") scheduled for tomorrow at 2:30 PM.\n\nDue to an unavoidable last-minute scheduling overlap, could we reschedule this to tomorrow at 4:30 PM, or Monday at 10:00 AM instead?\n\nThank you for your kindness and flexibility.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)`;
-
-      const draftB = isMusicClass
-        ? `Subject: Rescheduling Request: Music Class - Sumith Shetty\n\nDear Raju,\n\nThank you for scheduling the music class. I have a live "Unstop How to win a hackathon" event this Sunday between 11:00 AM and 3:00 PM that I must attend.\n\nCould we reschedule our music class session to Sunday at 3:30 PM, or Saturday at 1:00 PM instead?\n\nThank you for your understanding and guidance.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)`
-        : `Subject: Rescheduling Request: Final Interview - Sumith Shetty\n\nDear Jessica,\n\nThank you for reaching out regarding the technical interview. I have a pre-existing medical commitment tomorrow at 2:30 PM that I cannot defer.\n\nCould we reschedule our session to tomorrow at 4:00 PM, or Monday at 11:00 AM instead?\n\nThank you for your flexibility and understanding.\n\nSincerely,\nSumith Shetty (via Aheado Proactive Agent)`;
-
-      const recB = isMusicClass ? "sumi020905@gmail.com" : "jessica.recruiting@hightech.com";
-
-      // Option A: Reschedule Event A (Calendar Event - Dr Sunil Checkup or Hackathon)
       intercepts.push({
         id: "int-calendar-option-a",
         title: `Option A: Reschedule Calendar Event "${eventAName}"`,
-        description: descA,
+        description: `Aheado detected a schedule overlap: "${eventAName}" clashes with proposed meeting "${eventBName}" ${clashingTimeStr}. Resolve by rescheduling "${eventAName}" to preserve both.`,
         category: "calendar",
-        urgency: urgencyVal,
+        urgency: "HIGH",
         actionTaken: `Drafted rescheduling proposal for "${eventAName}".`,
         outputDraft: draftA,
         isConflictOption: true,
         conflictGroupId: "grp-calendar-clash",
         eventName: eventAName,
-        eventImportance: importanceA,
+        eventImportance: eventImportanceA,
         alternativeEventName: eventBName,
-        alternativeEventImportance: importanceB,
+        alternativeEventImportance: eventImportanceB,
         resolutionTarget: "A",
-        recipientEmail: isMusicClass ? "hackathon-leads@unstop.com" : "clinic-coordinator@clinicsunil.com"
+        recipientEmail: recipientEmailA
       });
 
-      // Option B: Reschedule Event B (Email-Proposed Interview or Music Class)
       intercepts.push({
         id: "int-calendar-option-b",
-        title: `Option B: Reschedule Proposed Meeting/Lesson "${eventBName}"`,
-        description: descB,
+        title: `Option B: Reschedule Proposed Meeting "${eventBName}"`,
+        description: `Aheado detected a schedule overlap: "${eventAName}" clashes with proposed meeting "${eventBName}" ${clashingTimeStr}. Resolve by rescheduling "${eventBName}" to preserve "${eventAName}".`,
         category: "calendar",
         urgency: "CRITICAL",
         actionTaken: `Drafted rescheduling proposal for "${eventBName}".`,
@@ -133,17 +378,15 @@ async function startServer() {
         isConflictOption: true,
         conflictGroupId: "grp-calendar-clash",
         eventName: eventBName,
-        eventImportance: importanceB,
+        eventImportance: eventImportanceB,
         alternativeEventName: eventAName,
-        alternativeEventImportance: importanceA,
+        alternativeEventImportance: eventImportanceA,
         resolutionTarget: "B",
-        recipientEmail: recB
+        recipientEmail: recipientEmailB
       });
     }
 
-    // Include Portal Deadline Shield ONLY if there are academic assignments/tasks
     if (hasAssignmentDeadline) {
-      // Find matching tasks
       const criticalTask = tasks && tasks.find((t: any) => t.urgency === "CRITICAL" || t.category === "Assignment");
       const taskTitle = criticalTask ? criticalTask.title : "Emergency Study Plan";
       
@@ -154,12 +397,11 @@ async function startServer() {
         category: "assignment",
         urgency: "CRITICAL",
         actionTaken: "Aheado drafted a 4-step framework study guide & thesis proposal structure.",
-        outputDraft: `📚 EMERGENCY STUDY SLATE:\n\n1. Thesis: Propose a hybrid agentic micro-task queue to address portal deadlines.\n2. Key Argument: Staggered local agents avoid the late-submission window penalty.\n3. Action Plan: Deploying automated checker and draft loader.\n4. Complete outline ready. Click 'Insert Draft' to export.`,
+        outputDraft: `📚 EMERGENCY STUDY SLATE:\n\n1. Thesis: Propose a hybrid agentic micro-task queue to address portal deadlines.\n2. Key Argument: Staggered local agents avoid late-submission penalties.\n3. Action Plan: Deploying automated checker and draft loader.\n4. Click 'Insert Draft' to export.`,
         recipientEmail: "admissions-registrar@canvaslms.edu"
       });
     }
 
-    // Include Bill Stream Late-Fee Interceptor ONLY if there is a bill/payment keywords
     if (hasBillDue) {
       intercepts.push({
         id: "int-bill-shield",
@@ -173,7 +415,6 @@ async function startServer() {
       });
     }
 
-    // Default fallback if absolutely nothing was generated to prevent an empty screen
     if (intercepts.length === 0) {
       intercepts.push({
         id: "int-passive-monitoring",
@@ -186,7 +427,6 @@ async function startServer() {
       });
     }
 
-    // Calculate dynamic risk score based on what is present
     let riskScore = 15;
     if (hasCalendarConflict) riskScore += 55;
     if (hasAssignmentDeadline) riskScore += 20;
@@ -195,7 +435,7 @@ async function startServer() {
 
     let summary = "System scans indicate your connected workspace is balanced and secure.";
     if (hasCalendarConflict) {
-      summary = `CRITICAL SCHEDULING CLASH DETECTED: Aheado intercepted a direct collision tomorrow at 2:30 PM between calendar event "${eventAName}" and the email proposal for "${eventBName}".`;
+      summary = `CRITICAL SCHEDULING CLASH DETECTED: Aheado intercepted a direct collision ${clashingTimeStr} between calendar event "${eventAName}" and the email proposal for "${eventBName}".`;
       if (hasAssignmentDeadline) {
         summary += " Additionally, you have high-priority deadlines approaching.";
       }
@@ -215,6 +455,118 @@ async function startServer() {
   };
 
   // API Endpoints
+  app.post("/api/proactive-ai/command", async (req, res) => {
+    const { command } = req.body;
+    if (!command) {
+      return res.status(400).json({ error: "Command is required" });
+    }
+
+    const client = getGeminiClient();
+
+    const getDemoCommandResponse = () => {
+      const lower = command.toLowerCase();
+      const isCalendar = lower.includes("calendar") || lower.includes("schedule") || lower.includes("meet") || lower.includes("appointment") || lower.includes("event");
+      const isGmail = lower.includes("gmail") || lower.includes("email") || lower.includes("draft") || lower.includes("send");
+
+      if (isCalendar) {
+        const summary = command.replace(/(schedule|add to calendar|calendar|meet|appointment|this|tomorrow|at)/gi, "").trim();
+        return {
+          type: "calendar",
+          calendar: {
+            summary: summary || "Aheado Scheduled Event",
+            description: `Scheduled via Aheado Command: "${command}"`,
+            startTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('.')[0] + 'Z',
+            endTime: new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString().split('.')[0] + 'Z',
+            recipientEmail: "sumithshetty451@gmail.com"
+          },
+          isDemo: true
+        };
+      } else if (isGmail) {
+        const recipientMatch = command.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
+        const recipient = recipientMatch ? recipientMatch[1] : "sumithshetty451@gmail.com";
+        const body = `Hi,\n\nThis is a draft generated via Aheado Command based on your request: "${command}"\n\nBest,\nSumith`;
+        return {
+          type: "gmail",
+          gmail: {
+            recipient,
+            subject: "Aheado Voice Dispatch: Task Alert",
+            body
+          },
+          isDemo: true
+        };
+      } else {
+        return {
+          type: "unknown",
+          message: `Could not confidently categorize command: "${command}". Try saying 'Schedule meeting...' or 'Draft email...'`,
+          isDemo: true
+        };
+      }
+    };
+
+    if (!client) {
+      return res.json(getDemoCommandResponse());
+    }
+
+    try {
+      const promptText = `
+      You are the smart natural language interface of Aheado.
+      Your job is to parse the user's spoken or typed command into a structured action for either Google Calendar or Gmail.
+      
+      User Command: "${command}"
+      Current Time Reference: ${new Date().toISOString()} (${new Date().toDateString()})
+      
+      Classify the command as "calendar" (if the user wants to schedule an event, meeting, appointment) or "gmail" (if they want to write, send, or draft an email). If neither, classify as "unknown".
+      
+      Output MUST be a single, strict, valid JSON object following this JSON schema exactly:
+      {
+        "type": "calendar" | "gmail" | "unknown",
+        "calendar": {
+          "summary": "Title of the calendar event",
+          "description": "Description of the event, including context",
+          "startTime": "ISO 8601 string of the event start time (be smart with relative times like 'tomorrow at 3 PM' using the current time reference)",
+          "endTime": "ISO 8601 string of the event end time (default to 1 hour after start time)",
+          "recipientEmail": "Extract any email mentioned, or default to sumithshetty451@gmail.com"
+        },
+        "gmail": {
+          "recipient": "Recipient email, extract any email mentioned or default to sumithshetty451@gmail.com",
+          "subject": "Clear, professional subject line",
+          "body": "Full body of the email. Keep it polite, clean, and helpful."
+        }
+      }
+      
+      Respond with ONLY the JSON object. No Markdown code block delimiters, no explanation. Just valid JSON.
+      `;
+
+      let textOutput = "";
+      try {
+        const response = await client.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: promptText,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        textOutput = response.text || "";
+      } catch (geminiError) {
+        console.error("Gemini model call error in command parser", geminiError);
+        return res.json(getDemoCommandResponse());
+      }
+
+      if (!textOutput) {
+        return res.json(getDemoCommandResponse());
+      }
+
+      const parsed = JSON.parse(textOutput.trim());
+      return res.json({
+        ...parsed,
+        isDemo: false
+      });
+    } catch (error) {
+      console.error("Failed to parse command with Gemini", error);
+      return res.json(getDemoCommandResponse());
+    }
+  });
+
   app.post("/api/proactive-ai/evaluate", async (req, res) => {
     const { scenario, tasks } = req.body;
     
@@ -239,121 +591,159 @@ async function startServer() {
 
     try {
       const promptText = `
-      You are the backend AI brain of "Aheado" - a proactive workspace helper.
-      Your job is to analyze a user's scenario and list of tasks, and identify intercepts that correspond strictly to actual conflicts, dues, or deadlines in the scenario.
+      You are the backend AI brain of Aheado. Your core mandate is to analyze the user's scenario and tasks to map them into distinct proactive automated intercepts.
       
-      CRITICAL SCANNING & FILTERING GUIDELINES:
-      - If there is NO bill or payment mentioned in the scenario, do NOT generate any bill/payment intercepts.
-      - If there is NO school assignment, test, or study plan mentioned in the scenario, do NOT generate any assignment/LMS intercepts.
-      
+      CRITICAL TRUTH & RELEVANCE CONSTRAINT:
+      - Do NOT fabricate fictional courses (like "Organic Chemistry Lab Report"), fake medical appointments (like "Doctor Sunil"), or exams unless they are explicitly mentioned in the user's scenario or tasks.
+      - If there are real scheduling conflicts, clashing calendar events, or deadlines in the scenario or tasks, map them exactly.
+      - If there are NO real calendar clashing events in the user's input, do NOT hallucinate fictional clashes. Instead, fulfill the schema by generating helpful, highly relevant productivity intercepts based directly on the user's actual entered tasks (e.g., preparing a dedicated focus block, suggesting a checklist, or warning about time density for the specific tasks listed). Label these clearly with categories like "Focus Strategy", "Time Allocation", or "Task Prep" rather than inventing external clashes.
+      - Always ensure the "intercepts" array is populated with at least 1-2 items to match the layout schema, but base them strictly on the user's actual input or general productivity optimization.
+
       CRITICAL SCHEDULING CONFLICTS GUIDELINES:
-      If there is a calendar clash or scheduling conflict between two events (e.g. a medical checkup and a job interview, or a Sunday hackathon clashing with a proposed music class):
+      If there is a real calendar clash or scheduling conflict between two events mentioned in the scenario or calendar:
       1. You MUST generate TWO distinct, mutually exclusive rescheduling option intercepts in the "intercepts" array so the user can choose which strategy to execute based on importance scores.
       2. These options must be:
-         - Option A: Reschedule Calendar Event (e.g. Pediatric Doctor Checkup, Appointment with Dr Sunil, or Unstop How to win a hackathon)
-         - Option B: Reschedule Proposed Email Meeting/Interview/Lesson (e.g. Technical Interview, or Music class)
+         - Option A: Reschedule Calendar Event (e.g. Reschedule the calendar event)
+         - Option B: Reschedule Proposed Email Meeting/Interview/Lesson (e.g. Reschedule the proposed meeting/email)
       3. For Option A, set:
          - "isConflictOption": true
          - "conflictGroupId": "grp-calendar-clash"
          - "eventName": name of the calendar event to reschedule
-         - "eventImportance": score from 0 to 100 representing how critical it is (e.g. 72 for medical, 88 for hackathon)
+         - "eventImportance": score from 0 to 100 representing how critical it is
          - "alternativeEventName": name of the other conflicting event
-         - "alternativeEventImportance": score of other event (e.g. 95 for interview, 75 for music class)
+         - "alternativeEventImportance": score of other event
          - "resolutionTarget": "A"
-         - "outputDraft": Rescheduling email/message draft. The draft MUST NOT propose rescheduling to the conflicting slot. Propose safe alternative times (e.g. tomorrow at 4:30 PM, or Sunday at 3:30 PM after the hackathon).
-         - "recipientEmail": Extract or generate the correct email (e.g. clinic-coordinator@clinicsunil.com or hackathon-leads@unstop.com)
+         - "outputDraft": Rescheduling email/message draft. The draft MUST NOT propose rescheduling to the conflicting slot. Propose safe alternative times.
+         - "recipientEmail": Extract or generate the correct email
       4. For Option B, set:
          - "isConflictOption": true
          - "conflictGroupId": "grp-calendar-clash"
          - "eventName": name of the proposed meeting/interview/lesson to reschedule
-         - "eventImportance": score from 0 to 100 representing how critical it is (e.g. 95 for interview, 75 for music class)
+         - "eventImportance": score from 0 to 100 representing how critical it is
          - "alternativeEventName": name of the other calendar event
-         - "alternativeEventImportance": score of other event (e.g. 72 or 88)
+         - "alternativeEventImportance": score of other event
          - "resolutionTarget": "B"
-         - "outputDraft": Rescheduling email draft. The draft MUST NOT propose rescheduling to the conflicting slot. Propose safe alternative times (e.g. tomorrow at 4:00 PM, Sunday at 3:30 PM, or Saturday at 1:00 PM).
-         - "recipientEmail": Extract or generate the recipient email (e.g. jessica.recruiting@hightech.com, sumi020905@gmail.com, or raju.music@gmail.com)
+         - "outputDraft": Rescheduling email draft. The draft MUST NOT propose rescheduling to the conflicting slot. Propose safe alternative times.
+         - "recipientEmail": Extract or generate the recipient email
       
+      CURRENT REFERENCE DATE/TIME: ${new Date().toISOString()} (${new Date().toDateString()})
+      Use this date/time as "today" to accurately resolve relative date phrases like "tomorrow", "this Sunday", "next Monday", "in 3 hours", etc., so that there are absolutely no date or year extraction blunders or hallucinations.
+
       User's Scenario: "${scenario || 'No specific scenario provided, evaluate general productivity hazards'}"
       Provided Tasks: ${JSON.stringify(tasks || [])}
       
       Provide a highly creative, actionable response in JSON format matching the schema.
       `;
 
-      // Implement a resilient, multi-model fallback with a longer timeout (15s) to handle high-demand 503 errors or latency spikes
-      const runWithTimeout = async (modelName: string, timeoutMs = 15000) => {
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Gemini call timed out for model: ${modelName}`)), timeoutMs)
-        );
+      // Resilient execution with key rotation AND model fallback
+      const executeWithKeyRotationAndFallback = async (timeoutMs = 45000) => {
+        const totalKeys = clientsPool.length;
+        if (totalKeys === 0) {
+          throw new Error("No Gemini API keys configured in pool");
+        }
 
-        const responsePromise = client.models.generateContent({
-          model: modelName,
-          contents: promptText,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                riskScore: { type: Type.INTEGER, description: "A calculated risk score out of 100 representing how severe the last-minute crisis is." },
-                summary: { type: Type.STRING, description: "A high-level synthesis of what is about to go wrong and how Aheado intercepts it." },
-                intercepts: {
-                  type: Type.ARRAY,
-                  items: {
+        // Only use gemini-2.5-flash as it is compatible with the provided keys
+        const modelsToTry = ["gemini-2.5-flash"];
+
+        for (const modelName of modelsToTry) {
+          console.log(`[Evaluate Route] Attempting evaluation sequence with model: ${modelName}`);
+          
+          let attemptsWithCurrentModel = 0;
+          while (attemptsWithCurrentModel < totalKeys) {
+            const clientIndex = currentKeyIndex % totalKeys;
+            const client = clientsPool[clientIndex];
+            const keyDisplayName = `GEMINI_API_KEY${clientIndex === 0 ? "" : "_" + (clientIndex + 1)}`;
+            
+            console.log(`[Evaluate Route] [Key Rotation] Key: ${keyDisplayName} (Index: ${clientIndex}), Model: ${modelName}`);
+
+            try {
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms for ${modelName}`)), timeoutMs)
+              );
+
+              const responsePromise = client.models.generateContent({
+                model: modelName,
+                contents: promptText,
+                config: {
+                  responseMimeType: "application/json",
+                  responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                      id: { type: Type.STRING },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      category: { type: Type.STRING, description: "Must be assignment, bill, or calendar" },
-                      urgency: { type: Type.STRING },
-                      actionTaken: { type: Type.STRING },
-                      outputDraft: { type: Type.STRING },
-                      isConflictOption: { type: Type.BOOLEAN },
-                      conflictGroupId: { type: Type.STRING },
-                      eventName: { type: Type.STRING },
-                      eventImportance: { type: Type.INTEGER },
-                      alternativeEventName: { type: Type.STRING },
-                      alternativeEventImportance: { type: Type.INTEGER },
-                      resolutionTarget: { type: Type.STRING },
-                      recipientEmail: { type: Type.STRING, description: "Extract or generate a realistic recipient email address, e.g. jessica.recruiting@hightech.com or billing@pge-energy-portal.com" }
+                      riskScore: { type: Type.INTEGER, description: "A calculated risk score out of 100 representing how severe the last-minute crisis is." },
+                      summary: { type: Type.STRING, description: "A high-level synthesis of what is about to go wrong and how Aheado intercepts it." },
+                      intercepts: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            id: { type: Type.STRING },
+                            title: { type: Type.STRING },
+                            description: { type: Type.STRING },
+                            category: { type: Type.STRING, description: "Must be assignment, bill, or calendar" },
+                            urgency: { type: Type.STRING },
+                            actionTaken: { type: Type.STRING },
+                            outputDraft: { type: Type.STRING },
+                            isConflictOption: { type: Type.BOOLEAN },
+                            conflictGroupId: { type: Type.STRING },
+                            eventName: { type: Type.STRING },
+                            eventImportance: { type: Type.INTEGER },
+                            alternativeEventName: { type: Type.STRING },
+                            alternativeEventImportance: { type: Type.INTEGER },
+                            resolutionTarget: { type: Type.STRING },
+                            recipientEmail: { type: Type.STRING, description: "Extract or generate a realistic recipient email address, e.g. jessica.recruiting@hightech.com or billing@pge-energy-portal.com" }
+                          },
+                          required: ["id", "title", "description", "category", "urgency", "actionTaken", "outputDraft"]
+                        }
+                      },
+                      reassurance: { type: Type.STRING }
                     },
-                    required: ["id", "title", "description", "category", "urgency", "actionTaken", "outputDraft"]
+                    required: ["riskScore", "summary", "intercepts", "reassurance"]
                   }
-                },
-                reassurance: { type: Type.STRING }
-              },
-              required: ["riskScore", "summary", "intercepts", "reassurance"]
+                }
+              });
+
+              const response: any = await Promise.race([responsePromise, timeoutPromise]);
+              const responseText = response.text;
+              if (!responseText) {
+                throw new Error("No response text from model");
+              }
+
+              const cleanedText = cleanJsonString(responseText);
+              const parsed = JSON.parse(cleanedText);
+              
+              if (!parsed || typeof parsed !== "object") {
+                throw new Error("Parsed JSON is not a valid object");
+              }
+              if (!parsed.intercepts || !Array.isArray(parsed.intercepts) || parsed.intercepts.length === 0) {
+                throw new Error("Parsed JSON is missing the intercepts array, or it is empty (severe truncation/repair)");
+              }
+              
+              return { ...parsed, isDemo: false };
+
+            } catch (err: any) {
+              const errMsg = err.message || "";
+              console.warn(`[Evaluate Route] [Key Rotation Warning] Key ${keyDisplayName} failed with model ${modelName}: ${errMsg}`);
+              
+              // Always cycle key on failure (429, timeout, parse error, or invalid schema) to ensure max resiliency
+              console.warn(`[Evaluate Route] [Key Rotation Action] Cycling from ${keyDisplayName} to the next key to ensure successful generation...`);
+              currentKeyIndex = (currentKeyIndex + 1) % totalKeys;
+              
+              attemptsWithCurrentModel++;
+              continue;
             }
           }
-        });
-
-        const response: any = await Promise.race([responsePromise, timeoutPromise]);
-        const responseText = response.text;
-        if (!responseText) {
-          throw new Error("No response text from model");
+          console.warn(`[Evaluate Route] Model ${modelName} failed on all keys in pool. Moving to next model option...`);
         }
-        return JSON.parse(responseText.trim());
+
+        throw new Error("All models and keys failed in rotation pool");
       };
 
       try {
-        let parsedData: any;
-        try {
-          console.log("[Evaluate Route] Attempting Gemini call using 'gemini-2.5-flash'...");
-          parsedData = await runWithTimeout("gemini-2.5-flash", 10000);
-          console.log("[Evaluate Route] Successfully retrieved analysis using 'gemini-2.5-flash'.");
-        } catch (firstError: any) {
-          console.warn(`[Evaluate Route] 'gemini-2.5-flash' failed or timed out: ${firstError.message}. Retrying with highly available fallback 'gemini-1.5-flash'...`);
-          try {
-            parsedData = await runWithTimeout("gemini-1.5-flash", 10000);
-            console.log("[Evaluate Route] Successfully retrieved analysis using fallback 'gemini-1.5-flash'.");
-          } catch (secondError: any) {
-            console.warn(`[Evaluate Route] Fallback model 'gemini-1.5-flash' also failed: ${secondError.message}. Retrying with secondary backup 'gemini-2.5-pro'...`);
-            parsedData = await runWithTimeout("gemini-2.5-pro", 10000);
-            console.log("[Evaluate Route] Successfully retrieved analysis using secondary backup 'gemini-2.5-pro'.");
-          }
-        }
-        return res.json({ success: true, isDemo: false, ...parsedData });
-      } catch (innerError: any) {
-        console.warn("[Evaluate Route] All live Gemini API model attempts failed or timed out. Switching to high-quality fallback demo response.", innerError.message || innerError);
+        const parsedData = await executeWithKeyRotationAndFallback(45000);
+        console.log("[Evaluate Route] Successfully completed evaluation using key rotation.");
+        return res.json({ success: true, isDemo: parsedData.isDemo === true, ...parsedData });
+      } catch (rotationErr: any) {
+        console.warn("[Evaluate Route] All live Gemini API model attempts failed or timed out. Switching to high-quality fallback demo response.", rotationErr.message || rotationErr);
         return res.json(getDemoResponse());
       }
 

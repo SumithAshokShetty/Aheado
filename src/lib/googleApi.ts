@@ -20,7 +20,10 @@ export const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 provider.addScope("https://www.googleapis.com/auth/gmail.send");
 provider.addScope("https://www.googleapis.com/auth/gmail.readonly");
+provider.addScope("https://www.googleapis.com/auth/gmail.compose");
 provider.addScope("https://www.googleapis.com/auth/calendar.events");
+provider.addScope("https://www.googleapis.com/auth/classroom.courses.readonly");
+provider.addScope("https://www.googleapis.com/auth/classroom.coursework.me.readonly");
 
 export interface GoogleUserProfile {
   email: string;
@@ -78,7 +81,7 @@ export async function googleSignIn(): Promise<{ user: User; accessToken: string 
 
     cachedAccessToken = credential.accessToken;
     
-    // Save user info in localStorage for persistence UI, but NEVER the sensitive accessToken itself
+    // Save user info and access token in localStorage for persistence across refreshes
     const userProfile: GoogleUserProfile = {
       email: result.user.email || "",
       name: result.user.displayName || "Google User",
@@ -86,6 +89,7 @@ export async function googleSignIn(): Promise<{ user: User; accessToken: string 
     };
     
     localStorage.setItem("aheado_google_profile", JSON.stringify(userProfile));
+    localStorage.setItem("aheado_google_access_token", credential.accessToken);
     
     return { 
       user: result.user, 
@@ -106,6 +110,7 @@ export async function googleSignOut() {
   await signOut(auth);
   cachedAccessToken = null;
   localStorage.removeItem("aheado_google_profile");
+  localStorage.removeItem("aheado_google_access_token");
 }
 
 /**
@@ -123,6 +128,10 @@ export function loadConnectionState(): GoogleConnectionState {
     }
   }
 
+  if (!cachedAccessToken) {
+    cachedAccessToken = localStorage.getItem("aheado_google_access_token");
+  }
+
   return {
     isConnected: !!cachedAccessToken && !!userProfile,
     accessToken: cachedAccessToken,
@@ -136,6 +145,7 @@ export function loadConnectionState(): GoogleConnectionState {
 export function applyManualDeveloperToken(token: string, profile: GoogleUserProfile) {
   cachedAccessToken = token;
   localStorage.setItem("aheado_google_profile", JSON.stringify(profile));
+  localStorage.setItem("aheado_google_access_token", token);
 }
 
 /**
@@ -208,6 +218,36 @@ export async function sendGmailEmail(
 }
 
 /**
+ * Create a draft email in the user's Gmail drafts
+ */
+export async function createGmailDraft(
+  accessToken: string,
+  to: string,
+  subject: string,
+  body: string
+): Promise<{ id: string; message: { id: string; threadId: string } }> {
+  const raw = buildRawEmail(to, subject, body);
+  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message: { raw }
+    })
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    const message = errData?.error?.message || response.statusText;
+    throw new Error(`Gmail Draft API error: ${message}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Create a real calendar event in Google Calendar primary calendar
  */
 export async function createCalendarEvent(
@@ -252,8 +292,28 @@ export async function createCalendarEvent(
 }
 
 /**
- * Update/Patch an existing calendar event (e.g. for negotiating new times)
+ * Delete a calendar event from primary calendar
  */
+export async function deleteCalendarEvent(
+  accessToken: string,
+  eventId: string
+): Promise<any> {
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    const message = errData?.error?.message || response.statusText;
+    throw new Error(`Google Calendar API delete error: ${message}`);
+  }
+
+  return response.text();
+}
+
 export async function updateCalendarEvent(
   accessToken: string,
   eventId: string,
@@ -397,5 +457,90 @@ export async function fetchLatestEmails(accessToken: string): Promise<SimpleGmai
   }
 
   return results;
+}
+
+export interface ClassroomDeadline {
+  id: string;
+  courseName: string;
+  title: string;
+  description?: string;
+  dueDate?: string;
+  dueDateTime?: string;
+  alternateLink?: string;
+}
+
+export async function fetchClassroomDeadlines(accessToken: string): Promise<ClassroomDeadline[]> {
+  const response = await fetch("https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    const message = errData?.error?.message || response.statusText;
+    throw new Error(`Google Classroom API courses fetch error: ${message}`);
+  }
+
+  const coursesData = await response.json();
+  const courses = coursesData.courses || [];
+  const deadlines: ClassroomDeadline[] = [];
+
+  for (const course of courses) {
+    try {
+      const cwRes = await fetch(`https://classroom.googleapis.com/v1/courses/${course.id}/courseWork`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (!cwRes.ok) continue;
+
+      const cwData = await cwRes.json();
+      const courseWorks = cwData.courseWork || [];
+
+      for (const cw of courseWorks) {
+        let dueDateStr = "";
+        let dueDateTimeStr = "";
+        if (cw.dueDate) {
+          const { year, month, day } = cw.dueDate;
+          const monthStr = String(month).padStart(2, '0');
+          const dayStr = String(day).padStart(2, '0');
+          dueDateStr = `${year}-${monthStr}-${dayStr}`;
+
+          if (cw.dueTime) {
+            const { hours, minutes } = cw.dueTime;
+            const hrStr = String(hours || 0).padStart(2, '0');
+            const minStr = String(minutes || 0).padStart(2, '0');
+            dueDateTimeStr = `${dueDateStr}T${hrStr}:${minStr}:00Z`;
+          } else {
+            dueDateTimeStr = `${dueDateStr}T23:59:59Z`;
+          }
+        }
+
+        deadlines.push({
+          id: cw.id,
+          courseName: course.name,
+          title: cw.title,
+          description: cw.description || "",
+          dueDate: dueDateStr,
+          dueDateTime: dueDateTimeStr,
+          alternateLink: cw.alternateLink || ""
+        });
+      }
+    } catch (e) {
+      console.error(`Failed to fetch coursework for course ${course.id}`, e);
+    }
+  }
+
+  // Sort by dueDateTime
+  deadlines.sort((a, b) => {
+    if (!a.dueDateTime) return 1;
+    if (!b.dueDateTime) return -1;
+    return new Date(a.dueDateTime).getTime() - new Date(b.dueDateTime).getTime();
+  });
+
+  return deadlines;
 }
 
