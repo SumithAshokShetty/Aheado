@@ -1,0 +1,24 @@
+{
+  "name": "Aheado Proactive Agent",
+  "short_name": "Aheado",
+  "description": "Proactive 24/7 AI-powered calendar clash and crisis prevention agent.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0a09",
+  "theme_color": "#f97316",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://cdn.jsdelivr.net/gh/twitter/twemoji@v14.0.2/assets/72x72/1f6e1.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/gh/twitter/twemoji@v14.0.2/assets/72x72/1f6e1.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

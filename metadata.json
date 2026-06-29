@@ -1,0 +1,6 @@
+{
+  "name": "Aheado",
+  "description": "A proactive agentic productivity workspace designed to intercept portal deadlines, automated bill streams, and calendar conflicts before they turn red.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
