@@ -106,12 +106,16 @@ Open `http://localhost:3000` to interact with the web interface.
 * **Production Web Engine URL**: [Aheado](https://aheado-1022664181538.asia-southeast1.run.app/)
 * **Native Desktop Production Client Build Link**: [Aheado Desktop](https://drive.google.com/drive/folders/1UwMhH168fcrwSFnzEUj_5va978X0q5Dc)
 * **Native Android Application Package (APK via Bubblewrap) Link**: [Aheado Mobile](https://drive.google.com/drive/folders/1CcOnVQLxcY89Y-xls_PVMR8q2ca7Zt4W)
+* **Aheado Demo Video**: [Video](https://drive.google.com/file/d/1R9A3Kj9YCPZ9dUsfUyInJQJkHPy23U-Q/view?usp=sharing)
 
 ---
 
 ## ⚠️ Important Project Note for Hackathon Reviewers
-The Google Cloud project running this application is automatically provisioned and managed by Google AI Studio behind the scenes to power our development and sandbox environments.
+The Google Cloud project driving this application is automatically provisioned and managed directly by **Google AI Studio** behind the scenes to power our development sandbox environment.
+Because this is a platform-managed deployment, developer accounts are granted restricted access to monitor deployment logs and active services (such as Cloud Run). We do not possess administrative Owner or IAM permissions to modify project-wide security configurations, manage global OAuth client credentials, or self-grant elevated administrative roles.
+Consequently, we cannot manually bypass the Google production sandbox restrictions or verify the OAuth Consent Screen. To protect user privacy, Google strictly prevents unverified applications from accessing live user Google Workspace environments. As a result, evaluators or visitors will not be able to sign in using their own personal Google accounts.
 
-Because it is a platform-managed project, developer accounts are granted access to view deployment logs and active services (like Cloud Run), but do not have administrative Owner or IAM permissions to modify project-wide security credentials, manage global OAuth clients, or self-grant administrative roles. This is why we cannot manually bypass the sandbox or edit the OAuth Consent Screen directly.
+### How to Evaluate the Live Application
+* **Use the Judge Bypass**: Simply click "Judge Bypass" (or "Try as Guest") on the application login screen. This grants you immediate, full access to the Crisis Preset Studio and allows you to interactively explore the live Aheado workspace without any authentication friction.
+* **Watch the Guided Walkthrough**: I highly recommend going through the official Demo Video to see the true essence of how Aheado actively monitors, intercepts, and handles real-time workspace crises.
 
-However, you can click **'Try as Guest'** on the application login screen to access the full Crisis Preset Studio and explore the Aheado workspace without needing to authenticate your own account.
